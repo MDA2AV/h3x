@@ -1,0 +1,512 @@
+/*
+ * h3x - an HTTP/3 load generator built on h2o's client stack.
+ *
+ * All of the hard parts - the QUIC transport (quicly), TLS (picotls), HTTP/3
+ * framing + QPACK, and the batched UDP I/O - are reused from libh2o-evloop. This
+ * file only adds what a load generator needs on top of h2o's src/httpclient.c:
+ * shared-nothing worker threads, a closed-loop concurrency driver, and merged
+ * latency percentiles. The per-connection setup mirrors h2o's httpclient.c.
+ */
+#include <errno.h>
+#include <getopt.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <openssl/ssl.h>
+#include "picotls.h"
+#include "picotls/openssl.h"
+#include "quicly.h"
+#include "h2o/hostinfo.h"
+#include "h2o/httpclient.h"
+
+#define DEFAULT_IO_TIMEOUT 5000
+
+/* Read-only after main() finishes parsing; shared by every worker thread. */
+static struct {
+    const char *url;
+    const char *method;
+    struct {
+        h2o_iovec_t name;
+        h2o_iovec_t value;
+    } headers[256];
+    size_t num_headers;
+    unsigned total_requests; /* -n : total across all threads */
+    unsigned concurrency;    /* -c : in-flight requests per thread */
+    unsigned threads;        /* -t */
+    int verify_none;         /* -k */
+    uint64_t recv_window;    /* -W */
+    uint64_t io_timeout;
+    int8_t http2_ratio; /* -2 */
+    int8_t http3_ratio; /* -3 (default 100; remainder falls back to HTTP/1) */
+} conf = {
+    .method = "GET",
+    .total_requests = 100,
+    .concurrency = 10,
+    .threads = 1,
+    .io_timeout = DEFAULT_IO_TIMEOUT,
+    .http3_ratio = 100,
+};
+
+static const char *progname;
+static const ptls_key_exchange_algorithm_t *h3_key_exchanges[4];
+
+/* One per thread. Everything here is touched by a single thread only, so no locking. */
+struct worker {
+    pthread_t tid;
+    unsigned idx;
+    unsigned remaining; /* requests not yet started */
+    unsigned inflight;
+    h2o_loop_t *loop;
+    h2o_httpclient_ctx_t ctx;
+    h2o_http3client_ctx_t h3ctx;
+    quicly_cid_plaintext_t next_cid;
+    h2o_multithread_queue_t *queue;
+    h2o_multithread_receiver_t getaddr_receiver;
+    h2o_httpclient_connection_pool_t connpool;
+    h2o_socketpool_t sockpool;
+    h2o_url_t target;
+    SSL_CTX *ssl_ctx; /* only for the HTTP/1|2 (TCP+TLS) fraction */
+    /* stats */
+    uint32_t *lat_us;
+    size_t lat_n, lat_cap;
+    uint64_t body_bytes;
+    unsigned n_ok, n_fail;
+};
+
+/* Per-request scratch, allocated in the request pool and stashed in client->data. */
+struct req_ctx {
+    struct worker *w;
+    struct timeval start;
+};
+
+static h2o_httpclient_head_cb on_connect(h2o_httpclient_t *client, const char *errstr, h2o_iovec_t *method, h2o_url_t *url,
+                                         const h2o_header_t **headers, size_t *num_headers, h2o_iovec_t *body,
+                                         h2o_httpclient_proceed_req_cb *proceed_req_cb, h2o_httpclient_properties_t *props,
+                                         h2o_url_t *origin);
+static h2o_httpclient_body_cb on_head(h2o_httpclient_t *client, const char *errstr, h2o_httpclient_on_head_t *args);
+static int on_body(h2o_httpclient_t *client, const char *errstr, h2o_header_t *trailers, size_t num_trailers);
+static void start_one(struct worker *w);
+
+static const char *ca_bundle(void)
+{
+    const char *e = getenv("H3X_CA_BUNDLE");
+    return e != NULL ? e : "/etc/ssl/certs/ca-certificates.crt";
+}
+
+static void record_latency(struct worker *w, const struct timeval *start)
+{
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    uint64_t us = (uint64_t)(now.tv_sec - start->tv_sec) * 1000000 + (now.tv_usec - start->tv_usec);
+    /* ponytail: keep every sample for exact percentiles (4 bytes each). Fine into the
+     * millions; swap for an HdrHistogram if runs get large enough for the array to hurt. */
+    if (w->lat_n == w->lat_cap) {
+        w->lat_cap = w->lat_cap != 0 ? w->lat_cap * 2 : 1024;
+        w->lat_us = h2o_mem_realloc(w->lat_us, w->lat_cap * sizeof(uint32_t));
+    }
+    w->lat_us[w->lat_n++] = us > UINT32_MAX ? UINT32_MAX : (uint32_t)us;
+}
+
+/* Retire the request: record its outcome, free its pool, decrement the in-flight
+ * count. The worker loop (not this callback) starts the replacement, which keeps
+ * request creation out of teardown and avoids reentrancy. Mirrors how h2o's
+ * httpclient.c frees client->pool inside the terminal on_body call. */
+static void request_done(h2o_httpclient_t *client, int ok)
+{
+    struct req_ctx *rc = client->data;
+    struct worker *w = rc->w;
+    if (ok) {
+        record_latency(w, &rc->start);
+        ++w->n_ok;
+    } else {
+        ++w->n_fail;
+    }
+    h2o_mem_clear_pool(client->pool);
+    free(client->pool);
+    --w->inflight;
+}
+
+static void start_one(struct worker *w)
+{
+    h2o_mem_pool_t *pool = h2o_mem_alloc(sizeof(*pool));
+    h2o_mem_init_pool(pool);
+    struct req_ctx *rc = h2o_mem_alloc_pool(pool, *rc, 1);
+    rc->w = w;
+    gettimeofday(&rc->start, NULL);
+
+    --w->remaining;
+    ++w->inflight;
+    /* On the first request this establishes the QUIC connection; subsequent requests
+     * reuse it, each on its own stream. h2o's connection pool handles the reuse. */
+    h2o_httpclient_connect(NULL, pool, rc, &w->ctx, &w->connpool, &w->target, NULL, on_connect);
+}
+
+static h2o_httpclient_head_cb on_connect(h2o_httpclient_t *client, const char *errstr, h2o_iovec_t *method, h2o_url_t *url,
+                                         const h2o_header_t **headers, size_t *num_headers, h2o_iovec_t *body,
+                                         h2o_httpclient_proceed_req_cb *proceed_req_cb, h2o_httpclient_properties_t *props,
+                                         h2o_url_t *origin)
+{
+    struct req_ctx *rc = client->data;
+    if (errstr != NULL) {
+        request_done(client, 0);
+        return NULL;
+    }
+
+    *method = h2o_iovec_init(conf.method, strlen(conf.method));
+    *url = rc->w->target;
+    h2o_headers_t headers_vec = {NULL};
+    for (size_t i = 0; i != conf.num_headers; ++i)
+        h2o_add_header_by_str(client->pool, &headers_vec, conf.headers[i].name.base, conf.headers[i].name.len, 1, NULL,
+                              conf.headers[i].value.base, conf.headers[i].value.len);
+    *headers = headers_vec.entries;
+    *num_headers = headers_vec.size;
+    *body = h2o_iovec_init(NULL, 0);
+    *proceed_req_cb = NULL;
+    return on_head;
+}
+
+static h2o_httpclient_body_cb on_head(h2o_httpclient_t *client, const char *errstr, h2o_httpclient_on_head_t *args)
+{
+    int ok = 200 <= args->status && args->status < 400;
+
+    if (errstr != NULL && errstr != h2o_httpclient_error_is_eos) {
+        request_done(client, 0);
+        return NULL;
+    }
+    /* A response with no body ends here; on_body is never called (see h2o's
+     * handle_input_expect_headers), so retire the request now. */
+    if (errstr == h2o_httpclient_error_is_eos) {
+        request_done(client, ok);
+        return NULL;
+    }
+    return on_body;
+}
+
+static int on_body(h2o_httpclient_t *client, const char *errstr, h2o_header_t *trailers, size_t num_trailers)
+{
+    struct req_ctx *rc = client->data;
+
+    if (errstr != NULL && errstr != h2o_httpclient_error_is_eos) {
+        request_done(client, 0);
+        return -1;
+    }
+
+    rc->w->body_bytes += (*client->buf)->size;
+    h2o_buffer_consume(&(*client->buf), (*client->buf)->size);
+
+    if (errstr == h2o_httpclient_error_is_eos)
+        request_done(client, 1);
+    return 0;
+}
+
+static void worker_init(struct worker *w)
+{
+    w->loop = h2o_evloop_create();
+
+    /* ---- HTTP/3 (quicly + picotls) context, one per thread ---- */
+    w->h3ctx = (h2o_http3client_ctx_t){
+        .tls =
+            {
+                .random_bytes = ptls_openssl_random_bytes,
+                .get_time = &ptls_get_time,
+                .key_exchanges = h3_key_exchanges,
+                .cipher_suites = ptls_openssl_cipher_suites,
+            },
+        .qpack = {.encoder_table_capacity = 4096},
+        .max_frame_payload_size = 16384,
+    };
+    quicly_amend_ptls_context(&w->h3ctx.tls);
+    w->h3ctx.quic = quicly_spec_context;
+    w->h3ctx.quic.transport_params.max_streams_uni = 10;
+    w->h3ctx.quic.tls = &w->h3ctx.tls;
+    {
+        uint8_t random_key[PTLS_SHA256_DIGEST_SIZE];
+        w->h3ctx.tls.random_bytes(random_key, sizeof(random_key));
+        w->h3ctx.quic.cid_encryptor = quicly_new_default_cid_encryptor(
+            &ptls_openssl_quiclb, &ptls_openssl_aes128ecb, &ptls_openssl_sha256, ptls_iovec_init(random_key, sizeof(random_key)));
+        ptls_clear_memory(random_key, sizeof(random_key));
+    }
+    w->h3ctx.quic.stream_open = &h2o_httpclient_http3_on_stream_open;
+    if (conf.recv_window != 0) {
+        w->h3ctx.quic.transport_params.max_stream_data.uni = conf.recv_window;
+        w->h3ctx.quic.transport_params.max_stream_data.bidi_local = conf.recv_window;
+        w->h3ctx.quic.transport_params.max_stream_data.bidi_remote = conf.recv_window;
+    }
+    if (!conf.verify_none) {
+        X509_STORE *store = X509_STORE_new();
+        if (store == NULL || X509_STORE_load_locations(store, ca_bundle(), NULL) != 1) {
+            fprintf(stderr, "failed to load CA bundle: %s (set H3X_CA_BUNDLE or pass -k)\n", ca_bundle());
+            exit(EXIT_FAILURE);
+        }
+        ptls_openssl_init_verify_certificate(&w->h3ctx.verify_cert, store);
+        X509_STORE_free(store);
+        w->h3ctx.tls.verify_certificate = &w->h3ctx.verify_cert.super;
+    }
+
+    /* per-thread CID space, so connection IDs across threads never collide */
+    w->next_cid = (quicly_cid_plaintext_t){.thread_id = w->idx};
+    h2o_socket_t *socks[2], **sp = socks;
+    if ((*sp = h2o_quic_create_client_socket(w->loop, AF_INET)) != NULL)
+        ++sp;
+    if ((*sp = h2o_quic_create_client_socket(w->loop, AF_INET6)) != NULL)
+        ++sp;
+    if (sp == socks) {
+        perror("failed to create UDP socket");
+        exit(EXIT_FAILURE);
+    }
+    h2o_quic_init_context(&w->h3ctx.h3, w->loop, socks[0], sp > socks + 1 ? socks[1] : NULL, &w->h3ctx.quic, &w->next_cid, NULL,
+                          h2o_httpclient_http3_notify_connection_update, 1 /* use_gso */, NULL);
+
+    /* ---- generic client context ---- */
+    w->ctx = (h2o_httpclient_ctx_t){
+        .loop = w->loop,
+        .getaddr_receiver = &w->getaddr_receiver,
+        .io_timeout = conf.io_timeout,
+        .connect_timeout = conf.io_timeout,
+        .first_byte_timeout = conf.io_timeout,
+        .keepalive_timeout = conf.io_timeout,
+        .max_buffer_size = 128 * 1024,
+        .http2 = {.max_concurrent_streams = 100},
+        .http3 = &w->h3ctx,
+    };
+    w->ctx.protocol_selector.ratio.http2 = conf.http2_ratio;
+    w->ctx.protocol_selector.ratio.http3 = conf.http3_ratio;
+
+    w->queue = h2o_multithread_create_queue(w->loop);
+    h2o_multithread_register_receiver(w->queue, &w->getaddr_receiver, h2o_hostinfo_getaddr_receiver);
+
+    /* ---- connection pool ---- */
+    if (h2o_url_parse(NULL, conf.url, SIZE_MAX, &w->target) != 0) {
+        fprintf(stderr, "unrecognized URL: %s\n", conf.url);
+        exit(EXIT_FAILURE);
+    }
+    h2o_socketpool_target_t *target = h2o_socketpool_create_target(&w->target, NULL);
+    h2o_socketpool_init_specific(&w->sockpool, 10, &target, 1, NULL);
+    h2o_socketpool_set_timeout(&w->sockpool, conf.io_timeout);
+    h2o_socketpool_register_loop(&w->sockpool, w->loop);
+    h2o_httpclient_connection_pool_init(&w->connpool, &w->sockpool);
+    if (conf.http3_ratio < 100) {
+        /* TLS for the TCP-based HTTP/1|2 fraction (HTTP/3 uses picotls above) */
+        w->ssl_ctx = SSL_CTX_new(SSLv23_client_method());
+        SSL_CTX_load_verify_locations(w->ssl_ctx, ca_bundle(), NULL);
+        SSL_CTX_set_verify(w->ssl_ctx, conf.verify_none ? SSL_VERIFY_NONE : SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                           NULL);
+        h2o_socketpool_set_ssl_ctx(&w->sockpool, w->ssl_ctx);
+    }
+}
+
+static void *worker_main(void *arg)
+{
+    struct worker *w = arg;
+    worker_init(w);
+
+    /* closed-loop: keep `concurrency` requests in flight until the slice is drained */
+    while (w->remaining != 0 || w->inflight != 0) {
+        while (w->inflight < conf.concurrency && w->remaining != 0)
+            start_one(w);
+        h2o_evloop_run(w->loop, INT32_MAX);
+    }
+
+    /* flush QUIC CONNECTION_CLOSE so servers do not log the runs as aborts */
+    if (conf.http3_ratio > 0) {
+        h2o_quic_close_all_connections(&w->h3ctx.h3);
+        while (h2o_quic_num_connections(&w->h3ctx.h3) != 0)
+            h2o_evloop_run(w->loop, 100);
+    }
+    return NULL;
+}
+
+static int cmp_u32(const void *a, const void *b)
+{
+    uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+    return (x > y) - (x < y);
+}
+
+/* p in [0,100] over an ascending-sorted array */
+static double pctl_ms(const uint32_t *sorted, size_t n, double p)
+{
+    if (n == 0)
+        return 0;
+    size_t idx = (size_t)(p / 100.0 * (double)(n - 1) + 0.5);
+    if (idx >= n)
+        idx = n - 1;
+    return sorted[idx] / 1000.0;
+}
+
+static void usage(void)
+{
+    fprintf(stderr,
+            "Usage: %s [options] <url>\n"
+            "  -n <count>   total requests to send (default: 100)\n"
+            "  -c <num>     concurrent requests per thread (default: 10)\n"
+            "  -t <num>     worker threads (default: 1)\n"
+            "  -3 <ratio>   HTTP/3 ratio 0-100 (default: 100)\n"
+            "  -2 <ratio>   HTTP/2 ratio 0-100 (remainder uses HTTP/1)\n"
+            "  -m <method>  request method (default: GET)\n"
+            "  -H <name:value>  add a request header (repeatable)\n"
+            "  -W <bytes>   HTTP/3 receive window (per stream)\n"
+            "  -k           skip TLS certificate verification\n"
+            "  -h           this help\n",
+            progname);
+}
+
+static void add_header(const char *arg)
+{
+    const char *colon = strchr(arg, ':');
+    if (colon == NULL) {
+        fprintf(stderr, "no ':' in -H value\n");
+        exit(EXIT_FAILURE);
+    }
+    const char *value = colon + 1;
+    while (*value == ' ' || *value == '\t')
+        ++value;
+    if (conf.num_headers >= sizeof(conf.headers) / sizeof(conf.headers[0])) {
+        fprintf(stderr, "too many headers\n");
+        exit(EXIT_FAILURE);
+    }
+    h2o_iovec_t name = h2o_strdup(NULL, arg, colon - arg);
+    h2o_strtolower(name.base, name.len);
+    conf.headers[conf.num_headers].name = name;
+    conf.headers[conf.num_headers].value = h2o_iovec_init(value, strlen(value));
+    ++conf.num_headers;
+}
+
+int main(int argc, char **argv)
+{
+    progname = argv[0];
+    SSL_load_error_strings();
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
+
+    int opt;
+    while ((opt = getopt(argc, argv, "n:c:t:3:2:m:H:W:kh")) != -1) {
+        switch (opt) {
+        case 'n':
+            conf.total_requests = (unsigned)strtoul(optarg, NULL, 10);
+            break;
+        case 'c':
+            conf.concurrency = (unsigned)strtoul(optarg, NULL, 10);
+            break;
+        case 't':
+            conf.threads = (unsigned)strtoul(optarg, NULL, 10);
+            break;
+        case '3':
+            conf.http3_ratio = (int8_t)atoi(optarg);
+            break;
+        case '2':
+            conf.http2_ratio = (int8_t)atoi(optarg);
+            break;
+        case 'm':
+            conf.method = optarg;
+            break;
+        case 'H':
+            add_header(optarg);
+            break;
+        case 'W':
+            conf.recv_window = strtoull(optarg, NULL, 10);
+            break;
+        case 'k':
+            conf.verify_none = 1;
+            break;
+        case 'h':
+            usage();
+            return 0;
+        default:
+            usage();
+            return EXIT_FAILURE;
+        }
+    }
+    argc -= optind;
+    argv += optind;
+    if (argc < 1) {
+        usage();
+        return EXIT_FAILURE;
+    }
+    conf.url = argv[0];
+
+    if (conf.concurrency < 1)
+        conf.concurrency = 1;
+    if (conf.threads < 1)
+        conf.threads = 1;
+    if (conf.total_requests < 1)
+        conf.total_requests = 1;
+    if (conf.threads > conf.total_requests)
+        conf.threads = conf.total_requests;
+    if ((int)conf.http2_ratio + (int)conf.http3_ratio > 100) {
+        fprintf(stderr, "HTTP/2 + HTTP/3 ratio exceeds 100\n");
+        return EXIT_FAILURE;
+    }
+
+    { /* default TLS key exchanges, matching h2o's httpclient */
+        size_t i = 0;
+#if PTLS_OPENSSL_HAVE_X25519
+        h3_key_exchanges[i++] = &ptls_openssl_x25519;
+#endif
+        h3_key_exchanges[i++] = &ptls_openssl_secp256r1;
+    }
+
+    struct worker *workers = h2o_mem_alloc(sizeof(*workers) * conf.threads);
+    memset(workers, 0, sizeof(*workers) * conf.threads);
+    unsigned base = conf.total_requests / conf.threads, rem = conf.total_requests % conf.threads;
+
+    fprintf(stderr, "h3x -> %s  (h3=%d h2=%d, %u threads x %u concurrent, %u requests)\n", conf.url, conf.http3_ratio,
+            conf.http2_ratio, conf.threads, conf.concurrency, conf.total_requests);
+
+    struct timeval t0, t1;
+    gettimeofday(&t0, NULL);
+    for (unsigned i = 0; i < conf.threads; ++i) {
+        workers[i].idx = i;
+        workers[i].remaining = base + (i < rem ? 1 : 0);
+        if (pthread_create(&workers[i].tid, NULL, worker_main, &workers[i]) != 0) {
+            perror("pthread_create");
+            return EXIT_FAILURE;
+        }
+    }
+    for (unsigned i = 0; i < conf.threads; ++i)
+        pthread_join(workers[i].tid, NULL);
+    gettimeofday(&t1, NULL);
+
+    /* ---- aggregate ---- */
+    double elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_usec - t0.tv_usec) / 1e6;
+    unsigned n_ok = 0, n_fail = 0;
+    uint64_t bytes = 0;
+    size_t total_lat = 0;
+    for (unsigned i = 0; i < conf.threads; ++i) {
+        n_ok += workers[i].n_ok;
+        n_fail += workers[i].n_fail;
+        bytes += workers[i].body_bytes;
+        total_lat += workers[i].lat_n;
+    }
+    uint32_t *lat = h2o_mem_alloc(sizeof(uint32_t) * (total_lat != 0 ? total_lat : 1));
+    size_t off = 0;
+    for (unsigned i = 0; i < conf.threads; ++i) {
+        memcpy(lat + off, workers[i].lat_us, workers[i].lat_n * sizeof(uint32_t));
+        off += workers[i].lat_n;
+        free(workers[i].lat_us);
+    }
+    qsort(lat, total_lat, sizeof(uint32_t), cmp_u32);
+
+    double mean = 0;
+    for (size_t i = 0; i < total_lat; ++i)
+        mean += lat[i];
+    if (total_lat != 0)
+        mean = mean / total_lat / 1000.0;
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "completed:   %u    failed: %u\n", n_ok, n_fail);
+    fprintf(stderr, "duration:    %.3f s\n", elapsed);
+    fprintf(stderr, "throughput:  %.0f req/s    %.2f MB/s\n", elapsed > 0 ? n_ok / elapsed : 0,
+            elapsed > 0 ? bytes / elapsed / (1024 * 1024) : 0);
+    fprintf(stderr, "latency ms:  min %.2f  mean %.2f  p50 %.2f  p90 %.2f  p99 %.2f  max %.2f\n", pctl_ms(lat, total_lat, 0),
+            mean, pctl_ms(lat, total_lat, 50), pctl_ms(lat, total_lat, 90), pctl_ms(lat, total_lat, 99),
+            pctl_ms(lat, total_lat, 100));
+
+    free(lat);
+    free(workers);
+    return n_fail != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+}
