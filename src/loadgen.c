@@ -4,8 +4,9 @@
  * All of the hard parts - the QUIC transport (quicly), TLS (picotls), HTTP/3
  * framing + QPACK, and the batched UDP I/O - are reused from libh2o-evloop. This
  * file only adds what a load generator needs on top of h2o's src/httpclient.c:
- * shared-nothing worker threads, a closed-loop concurrency driver, and merged
- * latency percentiles. The per-connection setup mirrors h2o's httpclient.c.
+ * shared-nothing worker threads, a closed-loop concurrency driver, connection
+ * churn with in-memory session resumption (0-RTT), and merged latency percentiles.
+ * The per-connection setup mirrors h2o's httpclient.c.
  */
 #include <errno.h>
 #include <getopt.h>
@@ -15,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <openssl/ssl.h>
@@ -29,6 +31,7 @@
 /* Read-only after main() finishes parsing; shared by every worker thread. */
 static struct {
     const char *url;
+    const char *connect_to; /* -x : override the layer-4 target (skip DNS / pin a backend) */
     const char *method;
     struct {
         h2o_iovec_t name;
@@ -38,28 +41,52 @@ static struct {
     unsigned total_requests; /* -n : total across all threads */
     unsigned concurrency;    /* -c : in-flight requests per thread */
     unsigned threads;        /* -t */
+    unsigned reconnect;      /* --reconnect N : requests per connection (0 = one per worker) */
     int verify_none;         /* -k */
+    int no_resumption;       /* --no-resumption : force a full handshake on every connection */
     uint64_t recv_window;    /* -W */
     uint64_t io_timeout;
-    int8_t http2_ratio; /* -2 */
-    int8_t http3_ratio; /* -3 (default 100; remainder falls back to HTTP/1) */
+    /* QUIC/TLS transport tuning - the experiment variables of a benchmark */
+    uint64_t max_udp_payload_size;     /* --max-udp-payload-size */
+    uint16_t initial_udp_payload_size; /* --initial-udp-payload-size */
+    int disallow_delayed_ack;          /* --disallow-delayed-ack */
+    int have_ack_frequency;            /* --ack-frequency given */
+    double ack_frequency;
+    int no_ecn;               /* --no-ecn */
+    uint32_t qpack_table;     /* --qpack-table (encoder dynamic table capacity) */
+    const char *key_exchange; /* --key-exchange <name> */
+    int8_t http2_ratio;       /* -2 */
+    int8_t http3_ratio;       /* -3 (default 100; remainder falls back to HTTP/1) */
 } conf = {
     .method = "GET",
     .total_requests = 100,
     .concurrency = 10,
     .threads = 1,
     .io_timeout = DEFAULT_IO_TIMEOUT,
+    .qpack_table = 4096,
     .http3_ratio = 100,
 };
 
 static const char *progname;
-static const ptls_key_exchange_algorithm_t *h3_key_exchanges[4];
+static const ptls_key_exchange_algorithm_t *h3_key_exchanges[8];
+
+/* In-memory resumption state, one per worker. The first connection does a full
+ * handshake and the server hands back a ticket; later connections present it and
+ * attempt 0-RTT. This replaces httpclient.c's file-based `-s`, which is the wrong
+ * shape for a load generator. */
+struct session_cache {
+    ptls_iovec_t ticket; /* TLS session ticket */
+    ptls_iovec_t token;  /* QUIC address token (NEW_TOKEN) */
+    quicly_transport_parameters_t tp;
+    int have_ticket;
+};
 
 /* One per thread. Everything here is touched by a single thread only, so no locking. */
 struct worker {
     pthread_t tid;
     unsigned idx;
-    unsigned remaining; /* requests not yet started */
+    unsigned remaining;      /* requests not yet started (worker total) */
+    unsigned episode_budget; /* requests still allowed to start on the current connection */
     unsigned inflight;
     h2o_loop_t *loop;
     h2o_httpclient_ctx_t ctx;
@@ -70,12 +97,17 @@ struct worker {
     h2o_httpclient_connection_pool_t connpool;
     h2o_socketpool_t sockpool;
     h2o_url_t target;
+    h2o_url_t connect_to;
     SSL_CTX *ssl_ctx; /* only for the HTTP/1|2 (TCP+TLS) fraction */
+    /* resumption */
+    ptls_save_ticket_t save_ticket;
+    quicly_save_resumption_token_t save_token;
+    struct session_cache sess;
     /* stats */
     uint32_t *lat_us;
     size_t lat_n, lat_cap;
     uint64_t body_bytes;
-    unsigned n_ok, n_fail;
+    unsigned n_ok, n_fail, n_resumed, conn_count;
 };
 
 /* Per-request scratch, allocated in the request pool and stashed in client->data. */
@@ -97,6 +129,54 @@ static const char *ca_bundle(void)
     const char *e = getenv("H3X_CA_BUNDLE");
     return e != NULL ? e : "/etc/ssl/certs/ca-certificates.crt";
 }
+
+/* ---- resumption callbacks (wired unless --no-resumption) ---- */
+
+static int load_session_cb(h2o_httpclient_ctx_t *ctx, struct sockaddr *server_addr, const char *server_name,
+                           ptls_iovec_t *address_token, ptls_iovec_t *session_ticket, quicly_transport_parameters_t *tp)
+{
+    struct worker *w = H2O_STRUCT_FROM_MEMBER(struct worker, ctx, ctx);
+    *address_token = ptls_iovec_init(NULL, 0);
+    *session_ticket = ptls_iovec_init(NULL, 0);
+    *tp = (quicly_transport_parameters_t){};
+    if (w->sess.have_ticket) {
+        /* hand out fresh copies; h2o frees these (address_token right after connect,
+         * session_ticket at connection teardown) */
+        *session_ticket = ptls_iovec_init(h2o_mem_alloc(w->sess.ticket.len), w->sess.ticket.len);
+        memcpy(session_ticket->base, w->sess.ticket.base, w->sess.ticket.len);
+        *tp = w->sess.tp;
+        if (w->sess.token.len != 0) {
+            *address_token = ptls_iovec_init(h2o_mem_alloc(w->sess.token.len), w->sess.token.len);
+            memcpy(address_token->base, w->sess.token.base, w->sess.token.len);
+        }
+    }
+    return 1;
+}
+
+static int save_ticket_cb(ptls_save_ticket_t *self, ptls_t *tls, ptls_iovec_t src)
+{
+    struct worker *w = H2O_STRUCT_FROM_MEMBER(struct worker, save_ticket, self);
+    quicly_conn_t *conn = *ptls_get_data_ptr(tls);
+    free(w->sess.ticket.base);
+    w->sess.ticket.base = h2o_mem_alloc(src.len);
+    memcpy(w->sess.ticket.base, src.base, src.len);
+    w->sess.ticket.len = src.len;
+    w->sess.tp = *quicly_get_remote_transport_parameters(conn);
+    w->sess.have_ticket = 1;
+    return 0;
+}
+
+static quicly_error_t save_token_cb(quicly_save_resumption_token_t *self, quicly_conn_t *conn, ptls_iovec_t token)
+{
+    struct worker *w = H2O_STRUCT_FROM_MEMBER(struct worker, save_token, self);
+    free(w->sess.token.base);
+    w->sess.token.base = h2o_mem_alloc(token.len);
+    memcpy(w->sess.token.base, token.base, token.len);
+    w->sess.token.len = token.len;
+    return 0;
+}
+
+/* ---- request lifecycle ---- */
 
 static void record_latency(struct worker *w, const struct timeval *start)
 {
@@ -140,9 +220,10 @@ static void start_one(struct worker *w)
     gettimeofday(&rc->start, NULL);
 
     --w->remaining;
+    --w->episode_budget;
     ++w->inflight;
-    /* On the first request this establishes the QUIC connection; subsequent requests
-     * reuse it, each on its own stream. h2o's connection pool handles the reuse. */
+    /* The first request on a connection establishes it; the rest reuse it as streams.
+     * h2o's connection pool handles reuse, and re-establishment after a churn close. */
     h2o_httpclient_connect(NULL, pool, rc, &w->ctx, &w->connpool, &w->target, NULL, on_connect);
 }
 
@@ -172,12 +253,20 @@ static h2o_httpclient_head_cb on_connect(h2o_httpclient_t *client, const char *e
 
 static h2o_httpclient_body_cb on_head(h2o_httpclient_t *client, const char *errstr, h2o_httpclient_on_head_t *args)
 {
-    int ok = 200 <= args->status && args->status < 400;
+    struct req_ctx *rc = client->data;
 
     if (errstr != NULL && errstr != h2o_httpclient_error_is_eos) {
         request_done(client, 0);
         return NULL;
     }
+
+    /* record whether this connection's TLS handshake was resumed (PSK / 0-RTT) */
+    h2o_httpclient_conn_properties_t props;
+    client->get_conn_properties(client, &props);
+    if (props.ssl.session_reused == 1)
+        ++rc->w->n_resumed;
+
+    int ok = 200 <= args->status && args->status < 400;
     /* A response with no body ends here; on_body is never called (see h2o's
      * handle_input_expect_headers), so retire the request now. */
     if (errstr == h2o_httpclient_error_is_eos) {
@@ -217,7 +306,7 @@ static void worker_init(struct worker *w)
                 .key_exchanges = h3_key_exchanges,
                 .cipher_suites = ptls_openssl_cipher_suites,
             },
-        .qpack = {.encoder_table_capacity = 4096},
+        .qpack = {.encoder_table_capacity = conf.qpack_table},
         .max_frame_payload_size = 16384,
     };
     quicly_amend_ptls_context(&w->h3ctx.tls);
@@ -232,11 +321,33 @@ static void worker_init(struct worker *w)
         ptls_clear_memory(random_key, sizeof(random_key));
     }
     w->h3ctx.quic.stream_open = &h2o_httpclient_http3_on_stream_open;
+
+    /* transport tuning knobs */
     if (conf.recv_window != 0) {
         w->h3ctx.quic.transport_params.max_stream_data.uni = conf.recv_window;
         w->h3ctx.quic.transport_params.max_stream_data.bidi_local = conf.recv_window;
         w->h3ctx.quic.transport_params.max_stream_data.bidi_remote = conf.recv_window;
     }
+    if (conf.max_udp_payload_size != 0)
+        w->h3ctx.quic.transport_params.max_udp_payload_size = conf.max_udp_payload_size;
+    if (conf.initial_udp_payload_size != 0)
+        w->h3ctx.quic.initial_egress_max_udp_payload_size = conf.initial_udp_payload_size;
+    if (conf.disallow_delayed_ack)
+        w->h3ctx.quic.transport_params.min_ack_delay_usec = UINT64_MAX;
+    if (conf.have_ack_frequency)
+        w->h3ctx.quic.ack_frequency = (uint16_t)(conf.ack_frequency * 1024);
+    if (conf.no_ecn)
+        w->h3ctx.quic.enable_ratio.ecn = 0;
+
+    /* resumption / 0-RTT */
+    if (!conf.no_resumption) {
+        w->save_ticket.cb = save_ticket_cb;
+        w->h3ctx.tls.save_ticket = &w->save_ticket;
+        w->save_token.cb = save_token_cb;
+        w->h3ctx.quic.save_resumption_token = &w->save_token;
+        w->h3ctx.load_session = load_session_cb;
+    }
+
     if (!conf.verify_none) {
         X509_STORE *store = X509_STORE_new();
         if (store == NULL || X509_STORE_load_locations(store, ca_bundle(), NULL) != 1) {
@@ -285,7 +396,15 @@ static void worker_init(struct worker *w)
         fprintf(stderr, "unrecognized URL: %s\n", conf.url);
         exit(EXIT_FAILURE);
     }
-    h2o_socketpool_target_t *target = h2o_socketpool_create_target(&w->target, NULL);
+    h2o_url_t *sp_target = &w->target;
+    if (conf.connect_to != NULL) {
+        if (h2o_url_parse(NULL, conf.connect_to, SIZE_MAX, &w->connect_to) != 0) {
+            fprintf(stderr, "invalid -x URL: %s\n", conf.connect_to);
+            exit(EXIT_FAILURE);
+        }
+        sp_target = &w->connect_to;
+    }
+    h2o_socketpool_target_t *target = h2o_socketpool_create_target(sp_target, NULL);
     h2o_socketpool_init_specific(&w->sockpool, 10, &target, 1, NULL);
     h2o_socketpool_set_timeout(&w->sockpool, conf.io_timeout);
     h2o_socketpool_register_loop(&w->sockpool, w->loop);
@@ -305,9 +424,24 @@ static void *worker_main(void *arg)
     struct worker *w = arg;
     worker_init(w);
 
-    /* closed-loop: keep `concurrency` requests in flight until the slice is drained */
     while (w->remaining != 0 || w->inflight != 0) {
-        while (w->inflight < conf.concurrency && w->remaining != 0)
+        /* Start of a fresh connection episode: everything from the previous episode
+         * has drained, so close its connection (in --reconnect mode) and let the next
+         * batch re-establish - resuming via the cached ticket. */
+        if (w->episode_budget == 0 && w->inflight == 0) {
+            if (w->remaining == 0)
+                break;
+            if (conf.reconnect != 0 && w->conn_count != 0) {
+                h2o_quic_close_all_connections(&w->h3ctx.h3);
+                while (h2o_quic_num_connections(&w->h3ctx.h3) != 0)
+                    h2o_evloop_run(w->loop, 100);
+            }
+            w->episode_budget = conf.reconnect != 0 ? conf.reconnect : w->remaining;
+            if (w->episode_budget > w->remaining)
+                w->episode_budget = w->remaining;
+            ++w->conn_count;
+        }
+        while (w->inflight < conf.concurrency && w->episode_budget != 0)
             start_one(w);
         h2o_evloop_run(w->loop, INT32_MAX);
     }
@@ -348,9 +482,19 @@ static void usage(void)
             "  -3 <ratio>   HTTP/3 ratio 0-100 (default: 100)\n"
             "  -2 <ratio>   HTTP/2 ratio 0-100 (remainder uses HTTP/1)\n"
             "  -m <method>  request method (default: GET)\n"
-            "  -H <name:value>  add a request header (repeatable)\n"
+            "  -H <name:value>   add a request header (repeatable)\n"
+            "  -x <url>     connect to this host:port instead of the URL's (pins a backend)\n"
             "  -W <bytes>   HTTP/3 receive window (per stream)\n"
             "  -k           skip TLS certificate verification\n"
+            "  --reconnect <N>   close each connection after N requests (exercises 0-RTT)\n"
+            "  --no-resumption   force a full handshake on every connection\n"
+            "  --max-udp-payload-size <bytes>\n"
+            "  --initial-udp-payload-size <bytes>\n"
+            "  --ack-frequency <0..1>\n"
+            "  --disallow-delayed-ack\n"
+            "  --no-ecn\n"
+            "  --qpack-table <bytes>   QPACK encoder table capacity (default: 4096)\n"
+            "  --key-exchange <name>   override the TLS key exchange (e.g. x25519)\n"
             "  -h           this help\n",
             progname);
 }
@@ -383,8 +527,30 @@ int main(int argc, char **argv)
     SSL_library_init();
     OpenSSL_add_all_algorithms();
 
+    enum {
+        OPT_MAX_UDP = 0x100,
+        OPT_INIT_UDP,
+        OPT_ACK_FREQ,
+        OPT_NO_DELAYED_ACK,
+        OPT_NO_ECN,
+        OPT_QPACK_TABLE,
+        OPT_KEY_EXCHANGE,
+        OPT_RECONNECT,
+        OPT_NO_RESUMPTION,
+    };
+    static struct option longopts[] = {{"max-udp-payload-size", required_argument, NULL, OPT_MAX_UDP},
+                                        {"initial-udp-payload-size", required_argument, NULL, OPT_INIT_UDP},
+                                        {"ack-frequency", required_argument, NULL, OPT_ACK_FREQ},
+                                        {"disallow-delayed-ack", no_argument, NULL, OPT_NO_DELAYED_ACK},
+                                        {"no-ecn", no_argument, NULL, OPT_NO_ECN},
+                                        {"qpack-table", required_argument, NULL, OPT_QPACK_TABLE},
+                                        {"key-exchange", required_argument, NULL, OPT_KEY_EXCHANGE},
+                                        {"reconnect", required_argument, NULL, OPT_RECONNECT},
+                                        {"no-resumption", no_argument, NULL, OPT_NO_RESUMPTION},
+                                        {"help", no_argument, NULL, 'h'},
+                                        {NULL}};
     int opt;
-    while ((opt = getopt(argc, argv, "n:c:t:3:2:m:H:W:kh")) != -1) {
+    while ((opt = getopt_long(argc, argv, "n:c:t:3:2:m:H:x:W:kh", longopts, NULL)) != -1) {
         switch (opt) {
         case 'n':
             conf.total_requests = (unsigned)strtoul(optarg, NULL, 10);
@@ -407,11 +573,42 @@ int main(int argc, char **argv)
         case 'H':
             add_header(optarg);
             break;
+        case 'x':
+            conf.connect_to = optarg;
+            break;
         case 'W':
             conf.recv_window = strtoull(optarg, NULL, 10);
             break;
         case 'k':
             conf.verify_none = 1;
+            break;
+        case OPT_MAX_UDP:
+            conf.max_udp_payload_size = strtoull(optarg, NULL, 10);
+            break;
+        case OPT_INIT_UDP:
+            conf.initial_udp_payload_size = (uint16_t)strtoul(optarg, NULL, 10);
+            break;
+        case OPT_ACK_FREQ:
+            conf.ack_frequency = atof(optarg);
+            conf.have_ack_frequency = 1;
+            break;
+        case OPT_NO_DELAYED_ACK:
+            conf.disallow_delayed_ack = 1;
+            break;
+        case OPT_NO_ECN:
+            conf.no_ecn = 1;
+            break;
+        case OPT_QPACK_TABLE:
+            conf.qpack_table = (uint32_t)strtoul(optarg, NULL, 10);
+            break;
+        case OPT_KEY_EXCHANGE:
+            conf.key_exchange = optarg;
+            break;
+        case OPT_RECONNECT:
+            conf.reconnect = (unsigned)strtoul(optarg, NULL, 10);
+            break;
+        case OPT_NO_RESUMPTION:
+            conf.no_resumption = 1;
             break;
         case 'h':
             usage();
@@ -442,7 +639,18 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    { /* default TLS key exchanges, matching h2o's httpclient */
+    if (conf.key_exchange != NULL) {
+        ptls_key_exchange_algorithm_t **named;
+        for (named = ptls_openssl_key_exchanges_all; *named != NULL; ++named)
+            if (strcasecmp((*named)->name, conf.key_exchange) == 0)
+                break;
+        if (*named == NULL) {
+            fprintf(stderr, "unknown key exchange: %s\n", conf.key_exchange);
+            return EXIT_FAILURE;
+        }
+        h3_key_exchanges[0] = *named;
+        h3_key_exchanges[1] = NULL;
+    } else {
         size_t i = 0;
 #if PTLS_OPENSSL_HAVE_X25519
         h3_key_exchanges[i++] = &ptls_openssl_x25519;
@@ -454,8 +662,9 @@ int main(int argc, char **argv)
     memset(workers, 0, sizeof(*workers) * conf.threads);
     unsigned base = conf.total_requests / conf.threads, rem = conf.total_requests % conf.threads;
 
-    fprintf(stderr, "h3x -> %s  (h3=%d h2=%d, %u threads x %u concurrent, %u requests)\n", conf.url, conf.http3_ratio,
-            conf.http2_ratio, conf.threads, conf.concurrency, conf.total_requests);
+    fprintf(stderr, "h3x -> %s  (h3=%d h2=%d, %u threads x %u concurrent, %u requests%s)\n", conf.url, conf.http3_ratio,
+            conf.http2_ratio, conf.threads, conf.concurrency, conf.total_requests,
+            conf.reconnect != 0 ? ", reconnect mode" : "");
 
     struct timeval t0, t1;
     gettimeofday(&t0, NULL);
@@ -473,12 +682,14 @@ int main(int argc, char **argv)
 
     /* ---- aggregate ---- */
     double elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_usec - t0.tv_usec) / 1e6;
-    unsigned n_ok = 0, n_fail = 0;
+    unsigned n_ok = 0, n_fail = 0, n_resumed = 0, conns = 0;
     uint64_t bytes = 0;
     size_t total_lat = 0;
     for (unsigned i = 0; i < conf.threads; ++i) {
         n_ok += workers[i].n_ok;
         n_fail += workers[i].n_fail;
+        n_resumed += workers[i].n_resumed;
+        conns += workers[i].conn_count;
         bytes += workers[i].body_bytes;
         total_lat += workers[i].lat_n;
     }
@@ -499,6 +710,7 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "\n");
     fprintf(stderr, "completed:   %u    failed: %u\n", n_ok, n_fail);
+    fprintf(stderr, "connections: %u    resumed (PSK/0-RTT): %u requests\n", conns, n_resumed);
     fprintf(stderr, "duration:    %.3f s\n", elapsed);
     fprintf(stderr, "throughput:  %.0f req/s    %.2f MB/s\n", elapsed > 0 ? n_ok / elapsed : 0,
             elapsed > 0 ? bytes / elapsed / (1024 * 1024) : 0);
