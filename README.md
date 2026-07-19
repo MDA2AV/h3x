@@ -10,8 +10,9 @@ cmake -S . -B build && cmake --build build --target h3x
 ```
 
 Needs a C toolchain, CMake, and OpenSSL headers; links h2o's evloop backend (`libh2o-evloop`).
-`deps/h2o` carries a local patch (UDP GRO on the receive path, +14–19% against batching servers).
-It is not upstream, so a `git submodule update` wipes it — see
+`deps/h2o` carries local patches: UDP GRO on the receive path (+14–19% against batching servers)
+and cross-connection `sendmmsg` batching on the send path (the `batch_sends` layer that
+`--send-batch` feeds). Neither is upstream, so a `git submodule update` wipes them — see
 [`patches/README.md`](patches/README.md) to reapply or revert.
 
 ## Usage
