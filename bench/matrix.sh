@@ -11,7 +11,7 @@ ulimit -n 65536 2>/dev/null || true
 
 run_cell() { # name url conns m  -> "RESULT h3x ..." then "RESULT h2load ..."
     local name=$1 url=$2 C=$3 M=$4 out
-    out=$(build/h3x -k -t $T --connections "$C" -c "$M" -d $D --send-batch 64 "$url" 2>&1)
+    out=$(build/h3x -k -t $T --connections "$C" -m "$M" -d $D --send-batch 64 "$url" 2>&1)
     echo "RESULT h3x conns=$C m=$M $(printf '%s' "$out" | awk '/throughput:/{r=$2} /completed:/{f=$4} END{printf "%d %d", r+0, f+0}') t=$(date +%T)"
     sleep $COOL
     out=$(bench/h2load --alpn-list=h3 -c "$C" -m "$M" -t $T -D $D -n 100000000 "$url" 2>&1)

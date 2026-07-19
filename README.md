@@ -23,7 +23,7 @@ and serves the 1 KB `bench/doc_root/index.html`.
 ## Run the load generator
 
 ```sh
-./build/h3x -k --connections 512 -c 8 -d 10 https://127.0.0.1:14433/
+./build/h3x -k --connections 512 -m 8 -d 10 https://127.0.0.1:14433/
 ```
 
 Threads default to one worker per CPU the process may use; connections are spread across the
@@ -35,11 +35,11 @@ threads; requests in flight = `connections × -c`.
 | `-d <seconds>` | run for a duration instead; overrides `-n` |
 | `-t <num>` | worker threads (all allowed CPUs) |
 | `--connections <n>` | total connections, spread across threads (one per thread) |
-| `-c <num>` | concurrent streams per connection (10) |
+| `-m <num>` | concurrent streams per connection (10; h2load calls this `-m` too) |
 | `--send-batch <n>` | hold N freed slots before refilling, so requests pack into fewer datagrams (1 = off) |
 | `--socket-per-conn` | one UDP socket per connection (unique 4-tuple, the h2load model); avoids servers that kill connections sharing a source port |
 | `--requests <file>` | load request templates (method/path/headers/body) from a `.http` file; multiple requests become a round-robin mix (overrides `-m`/`-H`). See `examples/`, and `--dump-requests` to check parsing |
-| `-m <method>` | request method (`GET`) |
+| `--method <method>` | request method (`GET`) |
 | `-H <name:value>` | add a request header (repeatable) |
 | `-x <url>` | connect to this host:port instead of the URL's (pin a backend / skip DNS) |
 | `-k` | skip certificate verification |
