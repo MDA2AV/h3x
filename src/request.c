@@ -46,6 +46,19 @@ int may_start(struct worker *w)
 
 void close_and_drain(struct worker *w)
 {
+    if (w->units != NULL) { /* --socket-per-conn: one quic ctx per connection */
+        for (unsigned i = 0; i < w->n_conns; ++i)
+            h2o_quic_close_all_connections(&w->units[i].h3ctx.h3);
+        for (;;) {
+            size_t remaining = 0;
+            for (unsigned i = 0; i < w->n_conns; ++i)
+                remaining += h2o_quic_num_connections(&w->units[i].h3ctx.h3);
+            if (remaining == 0)
+                break;
+            h2o_evloop_run(w->loop, 100);
+        }
+        return;
+    }
     h2o_quic_close_all_connections(&w->h3ctx.h3);
     while (h2o_quic_num_connections(&w->h3ctx.h3) != 0) {
         h2o_evloop_run(w->loop, 100);
@@ -97,7 +110,9 @@ void start_one(struct worker *w)
     rc->conn_idx = w->rr;
     h2o_httpclient_connection_pool_t *cp = &w->connpools[w->rr];
     w->rr = (w->rr + 1) % w->active_conns;
-    h2o_httpclient_connect(NULL, pool, rc, &w->ctx, cp, &w->target, NULL, on_connect);
+    /* in --socket-per-conn mode each connection has its own client ctx (own quic ctx + socket) */
+    h2o_httpclient_ctx_t *cctx = w->units != NULL ? &w->units[rc->conn_idx].ctx : &w->ctx;
+    h2o_httpclient_connect(NULL, pool, rc, cctx, cp, &w->target, NULL, on_connect);
 }
 
 static h2o_httpclient_head_cb on_connect(h2o_httpclient_t *client, const char *errstr, h2o_iovec_t *method, h2o_url_t *url,

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <openssl/ssl.h>
 #include "picotls/openssl.h"
@@ -71,6 +72,8 @@ static void usage(void)
             "  --reconnect <N>   close each connection after N requests (exercises 0-RTT)\n"
             "  --send-batch <N>  accumulate N freed slots before refilling, so requests pack into\n"
             "                    fewer datagrams (1 = off; helps server-bound, hurts client-bound)\n"
+            "  --socket-per-conn one UDP socket per connection (unique 4-tuple, the h2load model;\n"
+            "                    avoids servers that kill connections sharing a source port)\n"
             "  --no-resumption   force a full handshake on every connection\n"
             "  --max-udp-payload-size <bytes>\n"
             "  --initial-udp-payload-size <bytes>\n"
@@ -107,6 +110,13 @@ static void add_header(const char *arg)
 int main(int argc, char **argv)
 {
     progname = argv[0];
+    { /* --socket-per-conn opens up to 2 sockets per connection; lift the fd ceiling to the max */
+        struct rlimit rl;
+        if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur < rl.rlim_max) {
+            rl.rlim_cur = rl.rlim_max;
+            setrlimit(RLIMIT_NOFILE, &rl);
+        }
+    }
     SSL_load_error_strings();
     SSL_library_init();
     OpenSSL_add_all_algorithms();
@@ -123,6 +133,7 @@ int main(int argc, char **argv)
         OPT_NO_RESUMPTION,
         OPT_SEND_BATCH,
         OPT_CONNECTIONS,
+        OPT_SOCKET_PER_CONN,
     };
     static struct option longopts[] = {{"max-udp-payload-size", required_argument, NULL, OPT_MAX_UDP},
                                         {"initial-udp-payload-size", required_argument, NULL, OPT_INIT_UDP},
@@ -135,6 +146,7 @@ int main(int argc, char **argv)
                                         {"no-resumption", no_argument, NULL, OPT_NO_RESUMPTION},
                                         {"send-batch", required_argument, NULL, OPT_SEND_BATCH},
                                         {"connections", required_argument, NULL, OPT_CONNECTIONS},
+                                        {"socket-per-conn", no_argument, NULL, OPT_SOCKET_PER_CONN},
                                         {"help", no_argument, NULL, 'h'},
                                         {NULL}};
     int opt;
@@ -200,6 +212,9 @@ int main(int argc, char **argv)
             break;
         case OPT_CONNECTIONS:
             conf.connections = (unsigned)strtoul(optarg, NULL, 10);
+            break;
+        case OPT_SOCKET_PER_CONN:
+            conf.socket_per_conn = 1;
             break;
         case 'h':
             usage();

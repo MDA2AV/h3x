@@ -7,7 +7,10 @@
 int load_session_cb(h2o_httpclient_ctx_t *ctx, struct sockaddr *server_addr, const char *server_name,
                     ptls_iovec_t *address_token, ptls_iovec_t *session_ticket, quicly_transport_parameters_t *tp)
 {
-    struct worker *w = H2O_STRUCT_FROM_MEMBER(struct worker, ctx, ctx);
+    /* recover the worker via the getaddr_receiver pointer: it points into the worker in both
+     * shared-socket mode (ctx embedded in the worker) and --socket-per-conn mode (ctx embedded in
+     * a per-connection unit, where container_of on ctx would be wrong) */
+    struct worker *w = H2O_STRUCT_FROM_MEMBER(struct worker, getaddr_receiver, ctx->getaddr_receiver);
     *address_token = ptls_iovec_init(NULL, 0);
     *session_ticket = ptls_iovec_init(NULL, 0);
     *tp = (quicly_transport_parameters_t){};

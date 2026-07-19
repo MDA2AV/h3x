@@ -55,6 +55,7 @@ struct config {
     int no_ecn;               /* --no-ecn */
     uint32_t qpack_table;     /* --qpack-table (encoder dynamic table capacity) */
     const char *key_exchange; /* --key-exchange <name> */
+    int socket_per_conn;      /* --socket-per-conn : one UDP socket per connection (h2load model) */
 };
 extern struct config conf;
 
@@ -69,6 +70,15 @@ struct session_cache {
     ptls_iovec_t token;  /* QUIC address token (NEW_TOKEN) */
     quicly_transport_parameters_t tp;
     int have_ticket;
+};
+
+/* Per-connection client context in --socket-per-conn mode: own UDP socket, quic ctx, and
+ * httpclient ctx, so every QUIC connection gets a unique 4-tuple (the h2load model). Some
+ * servers (haproxy, nginx) kill connections that share a 4-tuple; see bench/results.html. */
+struct conn_unit {
+    h2o_httpclient_ctx_t ctx;
+    h2o_http3client_ctx_t h3ctx;
+    quicly_cid_plaintext_t next_cid;
 };
 
 /* One per thread. Everything here is touched by a single thread only, so no locking. */
@@ -87,6 +97,7 @@ struct worker {
     h2o_multithread_receiver_t getaddr_receiver;
     h2o_httpclient_connection_pool_t *connpools; /* one per connection this worker drives */
     h2o_socketpool_t sockpool;                   /* one shared by all this worker's connpools */
+    struct conn_unit *units; /* --socket-per-conn: one per connection; NULL in shared-socket mode */
     unsigned n_conns; /* number of connections (pools) this worker drives */
     unsigned rr;      /* round-robin index for dispatching the next request to a connection */
     unsigned active_conns; /* connpools currently in rotation; ramps up from CONN_RAMP_INITIAL */
