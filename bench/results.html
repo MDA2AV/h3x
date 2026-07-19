@@ -3,152 +3,51 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>h3x HTTP/3 benchmark</title>
+<title>h3x vs h2load</title>
 <style>
-  body{font:15px/1.55 system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#1a1a1a}
-  h1{font-size:1.45rem;margin-bottom:.2rem} h2{font-size:1.05rem;margin-top:2rem}
-  table{border-collapse:collapse;width:100%;margin:.6rem 0}
-  th,td{text-align:left;padding:.26rem .5rem;border-bottom:1px solid #e3e3e3}
-  th{font-size:.74rem;text-transform:uppercase;letter-spacing:.03em;color:#666}
-  td.srv{font-weight:600} td.c{text-align:center;color:#666;font-variant-numeric:tabular-nums}
-  td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600;width:5.5rem}
-  td.f{text-align:right;font-variant-numeric:tabular-nums;width:3.5rem;color:#999}
-  td.f.bad{color:#c2410c;font-weight:600}
-  tr.top td{border-top:2px solid #ccc} tr.best td.n{color:#1d4ed8}
-  .bar{background:#eee;border-radius:3px;height:13px;width:100%;min-width:120px}
-  .bar i{display:block;height:100%;border-radius:3px}
-  .h2o i{background:#3b82f6} .nginx i{background:#10b981} .haproxy i{background:#f59e0b}
-  .caddy i{background:#8b5cf6} .envoy i{background:#f43f5e}
-  .k{display:inline-block;width:.7rem;height:.7rem;border-radius:2px;vertical-align:middle;margin-right:.15rem}
-  .muted{color:#666;font-size:.9rem} ul{padding-left:1.15rem} li{margin:.3rem 0}
-  .lead{font-size:.95rem} code{background:#f2f2f2;padding:.05rem .3rem;border-radius:3px;font-size:.9em}
-  @media(prefers-color-scheme:dark){
-    body{background:#111;color:#eee} th,td{border-color:#333} th{color:#999}
-    td.c{color:#aaa} tr.top td{border-color:#555} tr.best td.n{color:#7db3ff}
-    td.f{color:#888} td.f.bad{color:#fb923c}
-    .bar{background:#333} .muted{color:#aaa} code{background:#222}
-  }
+  :root{color-scheme:light dark}
+  body{font:14px/1.5 system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem}
+  table{border-collapse:collapse;width:100%;margin:1rem 0}
+  th,td{text-align:right;padding:.15rem .6rem;border-bottom:1px solid #8884;font-variant-numeric:tabular-nums}
+  th{font-weight:600}
+  p{opacity:.75;font-size:.93em}
 </style>
 </head>
 <body>
-<h1>h3x: HTTP/3 load generators vs QUIC servers</h1>
-<p class="lead">Two load generators, five QUIC server stacks, two connection regimes. Neither client wins
-  outright: the shape of the workload decides it. h3x owns few fat connections with heavy stream multiplexing;
-  h2load owns many thin connections.</p>
-<p class="muted">Each cell is one 10 second run fetching the same 1&nbsp;KB file over HTTP/3. Loopback, single
-  box, TLS&nbsp;1.3. Bars are normalized to the fastest cell across all tables. Numbers are one representative
-  run and vary about 10 percent between runs.</p>
-<p class="muted">
-  <b>CPU split:</b> each server is pinned to 6 performance cores (CPUs 0 to 11, 12 SMT threads, 12 worker
-  threads). Both clients get the same other 20 threads (CPUs 12 to 31), verified identical, neither pinned per
-  thread. Server and client never share a core. &nbsp;
-  <b>Clients:</b> h3x = quicly (UDP GRO, cross-connection send batching, and connection-establishment pacing
-  on; send-batch is the request refill knob, swept below), h2load = ngtcp2. &nbsp;
-  <b>Servers:</b>
-  <span class="k" style="background:#3b82f6"></span>h2o = quicly ·
-  <span class="k" style="background:#10b981"></span>nginx = OpenSSL-QUIC ·
-  <span class="k" style="background:#f59e0b"></span>haproxy = HAProxy ·
-  <span class="k" style="background:#8b5cf6"></span>caddy = quic-go ·
-  <span class="k" style="background:#f43f5e"></span>envoy = Google quiche</p>
-
-<h2>Few connections, many streams: 8 connections x 32 streams</h2>
-<p class="muted">A browser-like shape: a handful of fat connections each multiplexing many concurrent streams
-  (256 requests in flight). This is what h3x is built for. It wins on 4 of 5 servers, 0 failures anywhere, and
-  beats h2load by nearly 6 times on h2o. The send-batch knob (accumulate this many freed stream slots before
-  refilling, so quicly packs requests into fuller datagrams) adds a few percent on the client-bound servers
-  and costs a few on the ones that batch their own responses.</p>
+<h3>h3x vs h2load — HTTP/3, 1 KB object</h3>
+<p>h2o server (quicly, GRO patch, 12 threads) on loopback; i9-14900K, 32 CPUs, nothing pinned or
+capped. Both clients native, <code>-t 32</code>, 10 s per cell, one run. h3x uses
+<code>--send-batch 64</code>, clamped to m. Raw data: <code>bench/matrix.log</code>.</p>
 <table>
-  <tr><th>Server</th><th>Client</th><th class="c">Conns</th><th class="c">Streams</th><th class="c">send-batch</th><th>req/s</th><th class="f">failed</th><th></th></tr>
-
-  <tr class="top"><td class="srv" rowspan="3">h2o</td><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">1</td><td class="n">2,178,334</td><td class="f">0</td><td><div class="bar h2o"><i style="width:95%"></i></div></td></tr>
-  <tr class="best"><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">8</td><td class="n">2,298,254</td><td class="f">0</td><td><div class="bar h2o"><i style="width:100%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">8</td><td class="c">32</td><td class="c">n/a</td><td class="n">383,159</td><td class="f">0</td><td><div class="bar h2o"><i style="width:17%"></i></div></td></tr>
-
-  <tr class="top"><td class="srv" rowspan="3">nginx</td><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">1</td><td class="n">795,794</td><td class="f">0</td><td><div class="bar nginx"><i style="width:35%"></i></div></td></tr>
-  <tr><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">8</td><td class="n">886,200</td><td class="f">0</td><td><div class="bar nginx"><i style="width:39%"></i></div></td></tr>
-  <tr class="best"><td>h2load</td><td class="c">8</td><td class="c">32</td><td class="c">n/a</td><td class="n">907,572</td><td class="f">0</td><td><div class="bar nginx"><i style="width:40%"></i></div></td></tr>
-
-  <tr class="top best"><td class="srv" rowspan="3">haproxy</td><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">1</td><td class="n">1,377,281</td><td class="f">0</td><td><div class="bar haproxy"><i style="width:60%"></i></div></td></tr>
-  <tr><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">8</td><td class="n">1,273,769</td><td class="f">0</td><td><div class="bar haproxy"><i style="width:55%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">8</td><td class="c">32</td><td class="c">n/a</td><td class="n">1,159,393</td><td class="f">0</td><td><div class="bar haproxy"><i style="width:50%"></i></div></td></tr>
-
-  <tr class="top"><td class="srv" rowspan="3">caddy</td><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">1</td><td class="n">212,664</td><td class="f">0</td><td><div class="bar caddy"><i style="width:9%"></i></div></td></tr>
-  <tr class="best"><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">8</td><td class="n">217,851</td><td class="f">0</td><td><div class="bar caddy"><i style="width:9%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">8</td><td class="c">32</td><td class="c">n/a</td><td class="n">208,891</td><td class="f">0</td><td><div class="bar caddy"><i style="width:9%"></i></div></td></tr>
-
-  <tr class="top best"><td class="srv" rowspan="3">envoy</td><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">1</td><td class="n">386,874</td><td class="f">0</td><td><div class="bar envoy"><i style="width:17%"></i></div></td></tr>
-  <tr><td>h3x</td><td class="c">8</td><td class="c">32</td><td class="c">8</td><td class="n">377,233</td><td class="f">0</td><td><div class="bar envoy"><i style="width:16%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">8</td><td class="c">32</td><td class="c">n/a</td><td class="n">296,844</td><td class="f">0</td><td><div class="bar envoy"><i style="width:13%"></i></div></td></tr>
+<tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h2load req/s</th><th>h3x / h2load</th></tr>
+<tr><td>64</td><td>1</td><td><b>963,643</b></td><td>7,006</td><td>138x</td></tr>
+<tr><td>64</td><td>2</td><td><b>939,424</b></td><td>10,576</td><td>89x</td></tr>
+<tr><td>64</td><td>8</td><td><b>2,349,192</b></td><td>81,506</td><td>29x</td></tr>
+<tr><td>64</td><td>16</td><td><b>3,150,850</b></td><td>273,715</td><td>11.5x</td></tr>
+<tr><td>64</td><td>32</td><td><b>3,459,710</b></td><td>490,294</td><td>7.1x</td></tr>
+<tr><td>64</td><td>64</td><td>3,577,100</td><td><b>3,656,214</b></td><td>0.98x</td></tr>
+<tr><td>128</td><td>1</td><td><b>982,149</b></td><td>7,570</td><td>130x</td></tr>
+<tr><td>128</td><td>2</td><td><b>1,048,179</b></td><td>20,765</td><td>50x</td></tr>
+<tr><td>128</td><td>8</td><td><b>1,574,694</b></td><td>125,652</td><td>12.5x</td></tr>
+<tr><td>128</td><td>16</td><td><b>2,770,733</b></td><td>366,695</td><td>7.6x</td></tr>
+<tr><td>128</td><td>32</td><td><b>3,134,421</b></td><td>847,550</td><td>3.7x</td></tr>
+<tr><td>128</td><td>64</td><td>3,345,294</td><td><b>3,397,904</b></td><td>0.98x</td></tr>
+<tr><td>256</td><td>1</td><td><b>1,008,129</b></td><td>19,598</td><td>51x</td></tr>
+<tr><td>256</td><td>2</td><td><b>943,434</b></td><td>29,302</td><td>32x</td></tr>
+<tr><td>256</td><td>8</td><td><b>1,076,192</b></td><td>255,954</td><td>4.2x</td></tr>
+<tr><td>256</td><td>16</td><td><b>1,736,952</b></td><td>535,960</td><td>3.2x</td></tr>
+<tr><td>256</td><td>32</td><td><b>2,147,708</b></td><td>1,313,721</td><td>1.6x</td></tr>
+<tr><td>256</td><td>64</td><td>2,583,122</td><td><b>3,034,838</b></td><td>0.85x</td></tr>
+<tr><td>512</td><td>1</td><td><b>977,626</b></td><td>26,587</td><td>37x</td></tr>
+<tr><td>512</td><td>2</td><td><b>913,240</b></td><td>53,922</td><td>17x</td></tr>
+<tr><td>512</td><td>8</td><td><b>1,064,309</b></td><td>273,380</td><td>3.9x</td></tr>
+<tr><td>512</td><td>16</td><td><b>1,171,369</b></td><td>815,468</td><td>1.4x</td></tr>
+<tr><td>512</td><td>32</td><td><b>1,595,957</b></td><td>1,203,139</td><td>1.3x</td></tr>
+<tr><td>512</td><td>64</td><td>2,010,507</td><td><b>2,643,559</b></td><td>0.76x</td></tr>
 </table>
-
-<h2>Many connections, few streams: 512 and 1024 connections x 8 streams</h2>
-<p class="muted">A crowd-of-clients shape: hundreds of thin connections, each with only a few streams. Now the
-  work is connection handling, not multiplexing, and it flips: h2load is faster on 4 of 5 servers and clean in
-  every cell, while h3x develops a failure tail. Send-batch is left off here because it does not help this
-  regime (see the curve below). h3x's throughput peaks near 512 connections and falls at 1024, the sign of
-  over-subscription.</p>
-<table>
-  <tr><th>Server</th><th>Client</th><th class="c">Conns</th><th class="c">Streams</th><th>req/s</th><th class="f">failed</th><th></th></tr>
-
-  <tr class="top best"><td class="srv" rowspan="4">h2o</td><td>h3x</td><td class="c">512</td><td class="c">8</td><td class="n">1,103,968</td><td class="f">0</td><td><div class="bar h2o"><i style="width:48%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">512</td><td class="c">8</td><td class="n">1,042,426</td><td class="f">0</td><td><div class="bar h2o"><i style="width:45%"></i></div></td></tr>
-  <tr><td>h3x</td><td class="c">1024</td><td class="c">8</td><td class="n">884,420</td><td class="f bad">2,013</td><td><div class="bar h2o"><i style="width:38%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">1024</td><td class="c">8</td><td class="n">326,674</td><td class="f">0</td><td><div class="bar h2o"><i style="width:14%"></i></div></td></tr>
-
-  <tr class="top"><td class="srv" rowspan="4">nginx</td><td>h3x</td><td class="c">512</td><td class="c">8</td><td class="n">650,587</td><td class="f bad">419</td><td><div class="bar nginx"><i style="width:28%"></i></div></td></tr>
-  <tr class="best"><td>h2load</td><td class="c">512</td><td class="c">8</td><td class="n">1,185,753</td><td class="f">0</td><td><div class="bar nginx"><i style="width:52%"></i></div></td></tr>
-  <tr><td>h3x</td><td class="c">1024</td><td class="c">8</td><td class="n">503,471</td><td class="f bad">790</td><td><div class="bar nginx"><i style="width:22%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">1024</td><td class="c">8</td><td class="n">1,128,033</td><td class="f">0</td><td><div class="bar nginx"><i style="width:49%"></i></div></td></tr>
-
-  <tr class="top"><td class="srv" rowspan="4">haproxy</td><td>h3x</td><td class="c">512</td><td class="c">8</td><td class="n">653,224</td><td class="f bad">3,209</td><td><div class="bar haproxy"><i style="width:28%"></i></div></td></tr>
-  <tr class="best"><td>h2load</td><td class="c">512</td><td class="c">8</td><td class="n">861,486</td><td class="f">0</td><td><div class="bar haproxy"><i style="width:37%"></i></div></td></tr>
-  <tr><td>h3x</td><td class="c">1024</td><td class="c">8</td><td class="n">506,590</td><td class="f">0</td><td><div class="bar haproxy"><i style="width:22%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">1024</td><td class="c">8</td><td class="n">593,861</td><td class="f">0</td><td><div class="bar haproxy"><i style="width:26%"></i></div></td></tr>
-
-  <tr class="top"><td class="srv" rowspan="4">caddy</td><td>h3x</td><td class="c">512</td><td class="c">8</td><td class="n">179,879</td><td class="f bad">1,571</td><td><div class="bar caddy"><i style="width:8%"></i></div></td></tr>
-  <tr class="best"><td>h2load</td><td class="c">512</td><td class="c">8</td><td class="n">195,459</td><td class="f">0</td><td><div class="bar caddy"><i style="width:9%"></i></div></td></tr>
-  <tr><td>h3x</td><td class="c">1024</td><td class="c">8</td><td class="n">133,243</td><td class="f bad">3,256</td><td><div class="bar caddy"><i style="width:6%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">1024</td><td class="c">8</td><td class="n">192,582</td><td class="f">0</td><td><div class="bar caddy"><i style="width:8%"></i></div></td></tr>
-
-  <tr class="top"><td class="srv" rowspan="4">envoy</td><td>h3x</td><td class="c">512</td><td class="c">8</td><td class="n">236,871</td><td class="f bad">208</td><td><div class="bar envoy"><i style="width:10%"></i></div></td></tr>
-  <tr class="best"><td>h2load</td><td class="c">512</td><td class="c">8</td><td class="n">327,949</td><td class="f">0</td><td><div class="bar envoy"><i style="width:14%"></i></div></td></tr>
-  <tr><td>h3x</td><td class="c">1024</td><td class="c">8</td><td class="n">233,001</td><td class="f">0</td><td><div class="bar envoy"><i style="width:10%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">1024</td><td class="c">8</td><td class="n">284,514</td><td class="f">0</td><td><div class="bar envoy"><i style="width:12%"></i></div></td></tr>
-</table>
-<p class="muted">Blue req/s marks the fastest client per server in each table. The failed column counts
-  requests that did not complete (connection or handshake errors); h2load finishes at 0 in every cell.</p>
-
-<h2>Why h3x fades as connections rise</h2>
-<p class="muted">h3x against h2o, holding streams at 8 and sweeping the connection count. Throughput falls with
-  every connection added past 64, and it does so with 0 failures right up until 1024. A clean monotonic
-  decline with no failures is the signature of per-connection overhead, not churn: each QUIC connection is
-  independent work the event loop services every pass (its own pacing, loss and idle timers, congestion
-  control, and per-connection encryption), so the cost grows with the connection count while the fixed 20 core
-  budget stays the same. The failure tail is a separate, second effect that only appears once the loop is too
-  busy to service every connection's timers in time, so some drop and re-handshake.</p>
-<table>
-  <tr><th class="c">Connections</th><th class="c">Streams</th><th>h3x req/s</th><th class="f">failed</th><th></th></tr>
-  <tr class="top"><td class="c">64</td><td class="c">8</td><td class="n">2,168,958</td><td class="f">0</td><td><div class="bar h2o"><i style="width:94%"></i></div></td></tr>
-  <tr><td class="c">128</td><td class="c">8</td><td class="n">1,362,992</td><td class="f">0</td><td><div class="bar h2o"><i style="width:59%"></i></div></td></tr>
-  <tr><td class="c">256</td><td class="c">8</td><td class="n">1,211,396</td><td class="f">0</td><td><div class="bar h2o"><i style="width:53%"></i></div></td></tr>
-  <tr><td class="c">512</td><td class="c">8</td><td class="n">1,088,336</td><td class="f">0</td><td><div class="bar h2o"><i style="width:47%"></i></div></td></tr>
-  <tr><td class="c">768</td><td class="c">8</td><td class="n">848,750</td><td class="f">0</td><td><div class="bar h2o"><i style="width:37%"></i></div></td></tr>
-  <tr><td class="c">1024</td><td class="c">8</td><td class="n">797,880</td><td class="f bad">2,722</td><td><div class="bar h2o"><i style="width:35%"></i></div></td></tr>
-</table>
-<p class="muted">h2load's curve is flatter because its per-connection loop is leaner (ngtcp2, no httpclient
-  connection-pool layer) and it holds a fixed connection set it never refills, so it does not churn. This
-  iteration added connection-establishment pacing to h3x (each worker caps its concurrent handshakes and ramps
-  the active set as connections come up); it roughly halved the h2o 1024-connection failure tail (about 3,700
-  to 2,000) with no throughput cost, but it does not change the decline. The decline is the fixed
-  per-connection cost. And on the servers where h2load leads on throughput, the gap is the receive side: GRO
-  only coalesces responses from servers that GSO-batch (h2o, haproxy), so against nginx quicly does more
-  per-packet work than ngtcp2, and no transport knob tried (recv window, UDP payload size, ACK frequency)
-  moved it. Closing that gap would mean not using quicly, the opposite of the reuse-h2o goal.</p>
-
-<h2>The receive side: UDP GRO</h2>
-<p class="muted">GRO is a build-time change in the h2o library h3x links, not a runtime flag, so it is on for
-  every cell. It coalesces the many small response datagrams a server GSO-batches into one recvmmsg, and helps
-  most against servers that batch their sends (h2o, haproxy) and roughly not at all against nginx, which does
-  not. It never hurts, so it stays on.</p>
+<p>Failures: h3x dropped 804 requests at 512×16 and 703 at 512×32; every other cell finished 0-fail
+for both clients. h2load's HTTP/3 engine stalls at low multiplexing (~100–200 req/s per connection
+at m=1–2) — those cells measure the client, not the server. Single unpinned runs: ratios under
+~1.5x are within run-to-run noise.</p>
 </body>
 </html>
