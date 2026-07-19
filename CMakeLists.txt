@@ -8,7 +8,12 @@ find_package(Threads REQUIRED)
 # not the h2o server or its test suite.
 add_subdirectory(deps/h2o EXCLUDE_FROM_ALL)
 
-add_executable(h3x src/loadgen.c)
+add_executable(h3x
+    src/main.c
+    src/worker.c
+    src/request.c
+    src/tls.c
+    src/stats.c)
 
 # Select the evloop backend, exactly as h2o compiles its own evloop binaries. Without
 # this the socket.h header defaults to libuv (H2O_USE_LIBUV=1) and the link fails on

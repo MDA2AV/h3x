@@ -10,3 +10,4 @@
 /bench/envoy-certs/
 /bench/server.out
 /bench/doc_root/
+.idea/
