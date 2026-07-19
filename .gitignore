@@ -1,2 +1,12 @@
 /build/
 *.log
+# generated benchmark artifacts (keep h2o.conf, run.sh, *.Dockerfile)
+/bench/server.crt
+/bench/server.key
+/bench/haproxy.pem
+/bench/server.pk8.key
+/bench/envoy.crt
+/bench/envoy.key
+/bench/envoy-certs/
+/bench/server.out
+/bench/doc_root/

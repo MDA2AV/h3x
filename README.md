@@ -15,6 +15,10 @@ cmake --build build --target h3x
 Needs a C toolchain, CMake, and OpenSSL headers. HTTP/3 runs on h2o's evloop
 backend, which is what the build links (`libh2o-evloop`).
 
+The `deps/h2o` submodule carries a local patch (UDP GRO on the receive path, +14–19%
+against batching servers). It is not upstream, so a `git submodule update` wipes it —
+see [`patches/README.md`](patches/README.md) to reapply or revert.
+
 ## Usage
 
 ```
@@ -29,8 +33,16 @@ percentiles — is printed at the end.
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `-n <count>` | 100 | total requests across all threads |
-| `-c <num>` | 10 | concurrent requests in flight, per thread |
-| `-t <num>` | 1 | worker threads (each with its own connection + event loop) |
+| `-d <seconds>` | off | run for this long instead of `-n` (overrides `-n`) |
+| `-t <num>` | all CPUs | worker threads; auto-detected from the container's CPU set and quota |
+| `--connections <n>` | one per thread | total connections, spread across the worker threads |
+| `-c <num>` | 10 | concurrent streams per connection |
+| `--send-batch <n>` | 1 (off) | hold this many freed slots before refilling, so requests pack into fewer datagrams |
+
+Each worker thread drives one or more QUIC connections over a single UDP socket and event loop,
+so `--connections` can far exceed `-t` (for example `-t 8 --connections 1024` puts 128 connections
+on each thread). Total requests in flight are `connections * -c`. Leaving `-t` unset uses every CPU
+the process is allowed (honoring `--cpuset-cpus` and `--cpus`), which is the intent under Docker.
 
 ### Protocol
 

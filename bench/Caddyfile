@@ -1,0 +1,16 @@
+# Caddy HTTP/3 server for benchmarking - serves the same 1KB file over HTTP/3 (QUIC) on :14436
+# using Caddy's quic-go stack (a fourth QUIC stack). auto_https off + explicit tls = use our own
+# self-signed cert, no ACME. Match the other servers' 4 workers via GOMAXPROCS=4 (set on `docker run`).
+{
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+https://127.0.0.1:14436 {
+	tls /certs/server.crt /certs/server.key
+	root * /doc_root
+	file_server
+}
