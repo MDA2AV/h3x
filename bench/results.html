@@ -14,40 +14,105 @@
 </style>
 </head>
 <body>
-<h3>h3x vs h2load — HTTP/3, 1 KB object</h3>
-<p>h2o server (quicly, GRO patch, 12 threads) on loopback; i9-14900K, 32 CPUs, nothing pinned or
-capped. Both clients native, <code>-t 32</code>, 10 s per cell, one run. h3x uses
-<code>--send-batch 64</code>, clamped to m. Raw data: <code>bench/matrix.log</code>.</p>
+<h3>h3x vs h2load: HTTP/3, 1 KB object</h3>
+<p>Loopback; i9-14900K, 32 CPUs, nothing pinned or capped. Both clients native, <code>-t 32</code>,
+10 s per cell, one run. h3x uses <code>--send-batch 64</code>, clamped to m. Raw data:
+<code>bench/matrix.log</code>, <code>bench/matrix-nginx.log</code>.</p>
+
+<h4>vs h2o (quicly, GRO patch, 12 threads, native)</h4>
 <table>
-<tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h2load req/s</th><th>h3x / h2load</th></tr>
-<tr><td>64</td><td>1</td><td><b>963,643</b></td><td>7,006</td><td>138x</td></tr>
-<tr><td>64</td><td>2</td><td><b>939,424</b></td><td>10,576</td><td>89x</td></tr>
-<tr><td>64</td><td>8</td><td><b>2,349,192</b></td><td>81,506</td><td>29x</td></tr>
-<tr><td>64</td><td>16</td><td><b>3,150,850</b></td><td>273,715</td><td>11.5x</td></tr>
-<tr><td>64</td><td>32</td><td><b>3,459,710</b></td><td>490,294</td><td>7.1x</td></tr>
-<tr><td>64</td><td>64</td><td>3,577,100</td><td><b>3,656,214</b></td><td>0.98x</td></tr>
-<tr><td>128</td><td>1</td><td><b>982,149</b></td><td>7,570</td><td>130x</td></tr>
-<tr><td>128</td><td>2</td><td><b>1,048,179</b></td><td>20,765</td><td>50x</td></tr>
-<tr><td>128</td><td>8</td><td><b>1,574,694</b></td><td>125,652</td><td>12.5x</td></tr>
-<tr><td>128</td><td>16</td><td><b>2,770,733</b></td><td>366,695</td><td>7.6x</td></tr>
-<tr><td>128</td><td>32</td><td><b>3,134,421</b></td><td>847,550</td><td>3.7x</td></tr>
-<tr><td>128</td><td>64</td><td>3,345,294</td><td><b>3,397,904</b></td><td>0.98x</td></tr>
-<tr><td>256</td><td>1</td><td><b>1,008,129</b></td><td>19,598</td><td>51x</td></tr>
-<tr><td>256</td><td>2</td><td><b>943,434</b></td><td>29,302</td><td>32x</td></tr>
-<tr><td>256</td><td>8</td><td><b>1,076,192</b></td><td>255,954</td><td>4.2x</td></tr>
-<tr><td>256</td><td>16</td><td><b>1,736,952</b></td><td>535,960</td><td>3.2x</td></tr>
-<tr><td>256</td><td>32</td><td><b>2,147,708</b></td><td>1,313,721</td><td>1.6x</td></tr>
-<tr><td>256</td><td>64</td><td>2,583,122</td><td><b>3,034,838</b></td><td>0.85x</td></tr>
-<tr><td>512</td><td>1</td><td><b>977,626</b></td><td>26,587</td><td>37x</td></tr>
-<tr><td>512</td><td>2</td><td><b>913,240</b></td><td>53,922</td><td>17x</td></tr>
-<tr><td>512</td><td>8</td><td><b>1,064,309</b></td><td>273,380</td><td>3.9x</td></tr>
-<tr><td>512</td><td>16</td><td><b>1,171,369</b></td><td>815,468</td><td>1.4x</td></tr>
-<tr><td>512</td><td>32</td><td><b>1,595,957</b></td><td>1,203,139</td><td>1.3x</td></tr>
-<tr><td>512</td><td>64</td><td>2,010,507</td><td><b>2,643,559</b></td><td>0.76x</td></tr>
+<tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h2load req/s</th><th>h3x / h2load</th><th>h3x drops</th></tr>
+<tr><td>64</td><td>1</td><td><b>963,643</b></td><td>7,006</td><td>138x</td><td>0</td></tr>
+<tr><td>64</td><td>2</td><td><b>939,424</b></td><td>10,576</td><td>89x</td><td>0</td></tr>
+<tr><td>64</td><td>8</td><td><b>2,349,192</b></td><td>81,506</td><td>29x</td><td>0</td></tr>
+<tr><td>64</td><td>16</td><td><b>3,150,850</b></td><td>273,715</td><td>11.5x</td><td>0</td></tr>
+<tr><td>64</td><td>32</td><td><b>3,459,710</b></td><td>490,294</td><td>7.1x</td><td>0</td></tr>
+<tr><td>64</td><td>64</td><td>3,577,100</td><td><b>3,656,214</b></td><td>0.98x</td><td>0</td></tr>
+<tr><td>128</td><td>1</td><td><b>982,149</b></td><td>7,570</td><td>130x</td><td>0</td></tr>
+<tr><td>128</td><td>2</td><td><b>1,048,179</b></td><td>20,765</td><td>50x</td><td>0</td></tr>
+<tr><td>128</td><td>8</td><td><b>1,574,694</b></td><td>125,652</td><td>12.5x</td><td>0</td></tr>
+<tr><td>128</td><td>16</td><td><b>2,770,733</b></td><td>366,695</td><td>7.6x</td><td>0</td></tr>
+<tr><td>128</td><td>32</td><td><b>3,134,421</b></td><td>847,550</td><td>3.7x</td><td>0</td></tr>
+<tr><td>128</td><td>64</td><td>3,345,294</td><td><b>3,397,904</b></td><td>0.98x</td><td>0</td></tr>
+<tr><td>256</td><td>1</td><td><b>1,008,129</b></td><td>19,598</td><td>51x</td><td>0</td></tr>
+<tr><td>256</td><td>2</td><td><b>943,434</b></td><td>29,302</td><td>32x</td><td>0</td></tr>
+<tr><td>256</td><td>8</td><td><b>1,076,192</b></td><td>255,954</td><td>4.2x</td><td>0</td></tr>
+<tr><td>256</td><td>16</td><td><b>1,736,952</b></td><td>535,960</td><td>3.2x</td><td>0</td></tr>
+<tr><td>256</td><td>32</td><td><b>2,147,708</b></td><td>1,313,721</td><td>1.6x</td><td>0</td></tr>
+<tr><td>256</td><td>64</td><td>2,583,122</td><td><b>3,034,838</b></td><td>0.85x</td><td>0</td></tr>
+<tr><td>512</td><td>1</td><td><b>977,626</b></td><td>26,587</td><td>37x</td><td>0</td></tr>
+<tr><td>512</td><td>2</td><td><b>913,240</b></td><td>53,922</td><td>17x</td><td>0</td></tr>
+<tr><td>512</td><td>8</td><td><b>1,064,309</b></td><td>273,380</td><td>3.9x</td><td>0</td></tr>
+<tr><td>512</td><td>16</td><td><b>1,171,369</b></td><td>815,468</td><td>1.4x</td><td>804</td></tr>
+<tr><td>512</td><td>32</td><td><b>1,595,957</b></td><td>1,203,139</td><td>1.3x</td><td>703</td></tr>
+<tr><td>512</td><td>64</td><td>2,010,507</td><td><b>2,643,559</b></td><td>0.76x</td><td>0</td></tr>
 </table>
-<p>Failures: h3x dropped 804 requests at 512×16 and 703 at 512×32; every other cell finished 0-fail
-for both clients. h2load's HTTP/3 engine stalls at low multiplexing (~100–200 req/s per connection
-at m=1–2) — those cells measure the client, not the server. Single unpinned runs: ratios under
-~1.5x are within run-to-run noise.</p>
+
+<h4>vs nginx (OpenSSL-QUIC, docker, 12 workers)</h4>
+<table>
+<tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h2load req/s</th><th>h3x / h2load</th><th>h3x drops</th></tr>
+<tr><td>64</td><td>1</td><td>507,998</td><td><b>560,188</b></td><td>0.91x</td><td>2</td></tr>
+<tr><td>64</td><td>2</td><td>611,570</td><td><b>820,102</b></td><td>0.75x</td><td>0</td></tr>
+<tr><td>64</td><td>8</td><td>875,160</td><td><b>1,353,200</b></td><td>0.65x</td><td>0</td></tr>
+<tr><td>64</td><td>16</td><td>1,021,713</td><td><b>1,585,622</b></td><td>0.64x</td><td>0</td></tr>
+<tr><td>64</td><td>32</td><td>1,049,344</td><td><b>1,628,570</b></td><td>0.64x</td><td>0</td></tr>
+<tr><td>64</td><td>64</td><td>1,147,004</td><td><b>1,648,319</b></td><td>0.70x</td><td>0</td></tr>
+<tr><td>128</td><td>1</td><td>533,248</td><td><b>555,676</b></td><td>0.96x</td><td>0</td></tr>
+<tr><td>128</td><td>2</td><td>518,623</td><td><b>784,103</b></td><td>0.66x</td><td>16</td></tr>
+<tr><td>128</td><td>8</td><td>732,800</td><td><b>1,273,322</b></td><td>0.58x</td><td>0</td></tr>
+<tr><td>128</td><td>16</td><td>861,809</td><td><b>1,387,994</b></td><td>0.62x</td><td>371</td></tr>
+<tr><td>128</td><td>32</td><td>959,687</td><td><b>1,487,968</b></td><td>0.64x</td><td>858</td></tr>
+<tr><td>128</td><td>64</td><td>1,044,810</td><td><b>1,549,483</b></td><td>0.67x</td><td>1,498</td></tr>
+<tr><td>256</td><td>1</td><td>519,302</td><td><b>526,289</b></td><td>0.99x</td><td>24</td></tr>
+<tr><td>256</td><td>2</td><td>554,124</td><td><b>769,199</b></td><td>0.72x</td><td>15</td></tr>
+<tr><td>256</td><td>8</td><td>623,976</td><td><b>1,194,853</b></td><td>0.52x</td><td>520</td></tr>
+<tr><td>256</td><td>16</td><td>780,949</td><td><b>1,352,111</b></td><td>0.58x</td><td>1,172</td></tr>
+<tr><td>256</td><td>32</td><td>878,087</td><td><b>1,390,804</b></td><td>0.63x</td><td>709</td></tr>
+<tr><td>256</td><td>64</td><td>633,603</td><td><b>1,475,488</b></td><td>0.43x</td><td>5,014</td></tr>
+<tr><td>512</td><td>1</td><td><b>488,503</b></td><td>483,681</td><td>1.01x</td><td>24</td></tr>
+<tr><td>512</td><td>2</td><td>520,786</td><td><b>721,959</b></td><td>0.72x</td><td>117</td></tr>
+<tr><td>512</td><td>8</td><td>588,501</td><td><b>1,171,295</b></td><td>0.50x</td><td>447</td></tr>
+<tr><td>512</td><td>16</td><td>502,532</td><td><b>1,263,867</b></td><td>0.40x</td><td>1,406</td></tr>
+<tr><td>512</td><td>32</td><td>569,147</td><td><b>1,370,700</b></td><td>0.42x</td><td>3,293</td></tr>
+<tr><td>512</td><td>64</td><td>594,501</td><td><b>1,382,457</b></td><td>0.43x</td><td>3,754</td></tr>
+</table>
+
+<h4>vs haproxy (HAProxy QUIC, docker, nbthread 12)</h4>
+<table>
+<tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h2load req/s</th><th>h3x / h2load</th><th>h3x drops</th></tr>
+<tr><td>64</td><td>1</td><td><b>501,638</b></td><td>409,628</td><td>1.22x</td><td>4</td></tr>
+<tr><td>64</td><td>2</td><td><b>593,757</b></td><td>519,830</td><td>1.14x</td><td>18</td></tr>
+<tr><td>64</td><td>8</td><td><b>834,017</b></td><td>737,189</td><td>1.13x</td><td>24</td></tr>
+<tr><td>64</td><td>16</td><td><b>1,193,653</b></td><td>958,858</td><td>1.24x</td><td>120</td></tr>
+<tr><td>64</td><td>32</td><td><b>1,372,950</b></td><td>1,238,902</td><td>1.11x</td><td>384</td></tr>
+<tr><td>64</td><td>64</td><td><b>1,431,141</b></td><td>1,377,461</td><td>1.04x</td><td>288</td></tr>
+<tr><td>128</td><td>1</td><td><b>509,154</b></td><td>462,545</td><td>1.10x</td><td>16</td></tr>
+<tr><td>128</td><td>2</td><td><b>558,959</b></td><td>530,206</td><td>1.05x</td><td>60</td></tr>
+<tr><td>128</td><td>8</td><td><b>908,644</b></td><td>685,602</td><td>1.33x</td><td>187</td></tr>
+<tr><td>128</td><td>16</td><td><b>1,106,939</b></td><td>927,248</td><td>1.19x</td><td>364</td></tr>
+<tr><td>128</td><td>32</td><td><b>1,218,556</b></td><td>1,082,862</td><td>1.13x</td><td>2,544</td></tr>
+<tr><td>128</td><td>64</td><td><b>1,243,373</b></td><td>1,153,955</td><td>1.08x</td><td>3,851</td></tr>
+<tr><td>256</td><td>1</td><td><b>510,760</b></td><td>476,616</td><td>1.07x</td><td>61</td></tr>
+<tr><td>256</td><td>2</td><td><b>557,303</b></td><td>538,703</td><td>1.03x</td><td>146</td></tr>
+<tr><td>256</td><td>8</td><td><b>647,722</b></td><td>628,809</td><td>1.03x</td><td>1,038</td></tr>
+<tr><td>256</td><td>16</td><td><b>847,377</b></td><td>828,462</td><td>1.02x</td><td>1,596</td></tr>
+<tr><td>256</td><td>32</td><td><b>950,923</b></td><td>913,045</td><td>1.04x</td><td>3,808</td></tr>
+<tr><td>256</td><td>64</td><td><b>1,051,092</b></td><td>909,548</td><td>1.16x</td><td>7,914</td></tr>
+<tr><td>512</td><td>1</td><td><b>503,065</b></td><td>455,408</td><td>1.10x</td><td>260</td></tr>
+<tr><td>512</td><td>2</td><td><b>536,284</b></td><td>506,904</td><td>1.06x</td><td>330</td></tr>
+<tr><td>512</td><td>8</td><td>495,827</td><td><b>543,304</b></td><td>0.91x</td><td>2,319</td></tr>
+<tr><td>512</td><td>16</td><td>533,381</td><td><b>633,767</b></td><td>0.84x</td><td>4,454</td></tr>
+<tr><td>512</td><td>32</td><td>663,604</td><td><b>674,357</b></td><td>0.98x</td><td>11,137</td></tr>
+<tr><td>512</td><td>64</td><td>830,796</td><td><b>846,605</b></td><td>0.98x</td><td>36,631</td></tr>
+</table>
+
+<p>h2load dropped 0 requests in all 72 cells. The h2load collapse at m=1-2 happens only against h2o
+(7k-54k req/s there vs 480k-820k against nginx and 410k-540k against haproxy): a pairing-specific
+interaction between ngtcp2 and the quicly server at low concurrency, not general client behavior.
+Against nginx the picture inverts: no GSO-batched responses means h3x's GRO cannot engage, quicly
+pays full per-packet receive cost, and h2load leads everywhere above m=1 while h3x also develops a
+failure tail. Against haproxy the throughputs tie within noise (haproxy GSO-batches, so h3x's GRO
+engages again), but h3x drops requests in every cell, growing with both axes to 36,631 at 512x64,
+while h2load stays clean. Single unpinned runs: ratios under ~1.5x are within run-to-run noise.</p>
 </body>
 </html>
