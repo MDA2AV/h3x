@@ -3,51 +3,181 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>h3x vs h2load</title>
+<title>h3x vs h2o-httpclient vs h2load</title>
 <style>
   :root{color-scheme:light dark}
-  body{font:14px/1.5 system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem}
-  table{border-collapse:collapse;width:100%;margin:1rem 0}
-  th,td{text-align:right;padding:.15rem .6rem;border-bottom:1px solid #8884;font-variant-numeric:tabular-nums}
+  body{font:14px/1.5 system-ui,sans-serif;max-width:880px;margin:2rem auto;padding:0 1rem}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;table-layout:fixed}
+  .pct{opacity:.55;font-size:.85em}
+  th,td{text-align:right;padding:.15rem .5rem;border-bottom:1px solid #8884;font-variant-numeric:tabular-nums}
   th{font-weight:600}
   p{opacity:.75;font-size:.93em}
+  dl.legend{display:grid;grid-template-columns:max-content 1fr;gap:.3rem 1rem;margin:1rem 0;font-size:.93em}
+  dl.legend dt{font-weight:600;white-space:nowrap}
+  dl.legend dd{margin:0;opacity:.75}
+  details{margin:1rem 0}
+  summary{cursor:pointer;font-weight:600;font-size:.93em;opacity:.8}
+  .g{background:#22c55e30} .y{background:#eab30826} .r{background:#ef444430}
+  input[name=tab]{display:none}
+  label{display:inline-block;padding:.3rem .9rem;cursor:pointer;opacity:.6;border-bottom:2px solid transparent}
+  .panel{display:none}
+  #t1:checked~label[for=t1],#t2:checked~label[for=t2],#t3:checked~label[for=t3]{opacity:1;font-weight:600;border-bottom-color:currentColor}
+  #t1:checked~#p1,#t2:checked~#p2,#t3:checked~#p3{display:block}
 </style>
 </head>
 <body>
-<h3>h3x vs h2load — HTTP/3, 1 KB object</h3>
-<p>h2o server (quicly, GRO patch, 12 threads) on loopback; i9-14900K, 32 CPUs, nothing pinned or
-capped. Both clients native, <code>-t 32</code>, 10 s per cell, one run. h3x uses
-<code>--send-batch 64</code>, clamped to m. Raw data: <code>bench/matrix.log</code>.</p>
+<h3>h3x vs h2o-httpclient vs h2load: HTTP/3, 1 KB object</h3>
+<p>Loopback; i9-14900K, 32 CPUs, nothing pinned or capped. All clients native, 10 s per cell, one
+run. h3x and h2load run <code>-t 32</code>; h3x uses <code>--send-batch 64</code>, clamped to m.
+Per row: <span class="g">&nbsp;green&nbsp;</span> = fastest client,
+<span class="r">&nbsp;red&nbsp;</span> = slowest, <span class="y">&nbsp;yellow&nbsp;</span> = in
+between. Raw data: <code>bench/matrix*.log</code>.</p>
+<dl class="legend">
+<dt>h3x</dt><dd>this project, 32 worker threads, each multiplexing its share of the connections
+over one UDP socket (connections share the thread's 4-tuple, distinguished by QUIC connection
+ID)</dd>
+<dt>h3x spc</dt><dd>the same binary with <code>--socket-per-conn</code>: one UDP socket per
+connection, so every connection has a unique 4-tuple; cross-connection sendmmsg batching is off
+in this mode</dd>
+<dt>h2o-httpclient</dt><dd>h2o's reference client, single-threaded and single-connection; run
+here as one process per connection (own socket) with <code>-C</code> = m streams, stopped at
+10 s, completions counted from status lines. At 256-512 connections that is 256-512 processes on
+32 CPUs (scheduler oversubscribed, fork storm at cell start), so treat that column there as a
+floor, not a ceiling</dd>
+<dt>h2load</dt><dd>nghttp2's load tool on the ngtcp2 stack, one socket per connection</dd>
+</dl>
+
+<input type="radio" name="tab" id="t1" checked>
+<input type="radio" name="tab" id="t2">
+<input type="radio" name="tab" id="t3">
+<label for="t1">h2o</label><label for="t2">nginx</label><label for="t3">haproxy</label>
+
+<div class="panel" id="p1">
+<h4>vs h2o (quicly, GRO patch, 12 threads, native)</h4>
 <table>
-<tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h2load req/s</th><th>h3x / h2load</th></tr>
-<tr><td>64</td><td>1</td><td><b>963,643</b></td><td>7,006</td><td>138x</td></tr>
-<tr><td>64</td><td>2</td><td><b>939,424</b></td><td>10,576</td><td>89x</td></tr>
-<tr><td>64</td><td>8</td><td><b>2,349,192</b></td><td>81,506</td><td>29x</td></tr>
-<tr><td>64</td><td>16</td><td><b>3,150,850</b></td><td>273,715</td><td>11.5x</td></tr>
-<tr><td>64</td><td>32</td><td><b>3,459,710</b></td><td>490,294</td><td>7.1x</td></tr>
-<tr><td>64</td><td>64</td><td>3,577,100</td><td><b>3,656,214</b></td><td>0.98x</td></tr>
-<tr><td>128</td><td>1</td><td><b>982,149</b></td><td>7,570</td><td>130x</td></tr>
-<tr><td>128</td><td>2</td><td><b>1,048,179</b></td><td>20,765</td><td>50x</td></tr>
-<tr><td>128</td><td>8</td><td><b>1,574,694</b></td><td>125,652</td><td>12.5x</td></tr>
-<tr><td>128</td><td>16</td><td><b>2,770,733</b></td><td>366,695</td><td>7.6x</td></tr>
-<tr><td>128</td><td>32</td><td><b>3,134,421</b></td><td>847,550</td><td>3.7x</td></tr>
-<tr><td>128</td><td>64</td><td>3,345,294</td><td><b>3,397,904</b></td><td>0.98x</td></tr>
-<tr><td>256</td><td>1</td><td><b>1,008,129</b></td><td>19,598</td><td>51x</td></tr>
-<tr><td>256</td><td>2</td><td><b>943,434</b></td><td>29,302</td><td>32x</td></tr>
-<tr><td>256</td><td>8</td><td><b>1,076,192</b></td><td>255,954</td><td>4.2x</td></tr>
-<tr><td>256</td><td>16</td><td><b>1,736,952</b></td><td>535,960</td><td>3.2x</td></tr>
-<tr><td>256</td><td>32</td><td><b>2,147,708</b></td><td>1,313,721</td><td>1.6x</td></tr>
-<tr><td>256</td><td>64</td><td>2,583,122</td><td><b>3,034,838</b></td><td>0.85x</td></tr>
-<tr><td>512</td><td>1</td><td><b>977,626</b></td><td>26,587</td><td>37x</td></tr>
-<tr><td>512</td><td>2</td><td><b>913,240</b></td><td>53,922</td><td>17x</td></tr>
-<tr><td>512</td><td>8</td><td><b>1,064,309</b></td><td>273,380</td><td>3.9x</td></tr>
-<tr><td>512</td><td>16</td><td><b>1,171,369</b></td><td>815,468</td><td>1.4x</td></tr>
-<tr><td>512</td><td>32</td><td><b>1,595,957</b></td><td>1,203,139</td><td>1.3x</td></tr>
-<tr><td>512</td><td>64</td><td>2,010,507</td><td><b>2,643,559</b></td><td>0.76x</td></tr>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:18%"><col span="2" style="width:8%"></colgroup><tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h3x spc req/s</th><th>h2o-httpclient req/s</th><th>h2load req/s</th><th>h3x drops</th><th>spc drops</th></tr>
+<tr><td>64</td><td>1</td><td class="g"><b>963,643</b> <span class="pct">100%</span></td><td class="y">883,265 <span class="pct">92%</span></td><td class="y">640,412 <span class="pct">66%</span></td><td class="r">7,006 <span class="pct">0.7%</span></td><td>0</td><td>0</td></tr>
+<tr><td>64</td><td>2</td><td class="y">939,424 <span class="pct">98%</span></td><td class="y">934,402 <span class="pct">97%</span></td><td class="g"><b>963,501</b> <span class="pct">100%</span></td><td class="r">10,576 <span class="pct">1.1%</span></td><td>0</td><td>0</td></tr>
+<tr><td>64</td><td>8</td><td class="g"><b>2,349,192</b> <span class="pct">100%</span></td><td class="y">2,209,206 <span class="pct">94%</span></td><td class="y">1,615,507 <span class="pct">69%</span></td><td class="r">81,506 <span class="pct">3.5%</span></td><td>0</td><td>0</td></tr>
+<tr><td>64</td><td>16</td><td class="g"><b>3,150,850</b> <span class="pct">100%</span></td><td class="y">2,688,326 <span class="pct">85%</span></td><td class="y">1,746,546 <span class="pct">55%</span></td><td class="r">273,715 <span class="pct">8.7%</span></td><td>0</td><td>0</td></tr>
+<tr><td>64</td><td>32</td><td class="g"><b>3,459,710</b> <span class="pct">100%</span></td><td class="y">3,247,221 <span class="pct">94%</span></td><td class="y">1,707,555 <span class="pct">49%</span></td><td class="r">490,294 <span class="pct">14%</span></td><td>0</td><td>0</td></tr>
+<tr><td>64</td><td>64</td><td class="y">3,577,100 <span class="pct">98%</span></td><td class="y">3,254,347 <span class="pct">89%</span></td><td class="r">1,644,840 <span class="pct">45%</span></td><td class="g"><b>3,656,214</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>128</td><td>1</td><td class="g"><b>982,149</b> <span class="pct">100%</span></td><td class="y">638,254 <span class="pct">65%</span></td><td class="y">612,155 <span class="pct">62%</span></td><td class="r">7,570 <span class="pct">0.8%</span></td><td>0</td><td>0</td></tr>
+<tr><td>128</td><td>2</td><td class="g"><b>1,048,179</b> <span class="pct">100%</span></td><td class="y">725,068 <span class="pct">69%</span></td><td class="y">900,141 <span class="pct">86%</span></td><td class="r">20,765 <span class="pct">2.0%</span></td><td>0</td><td>0</td></tr>
+<tr><td>128</td><td>8</td><td class="g"><b>1,574,694</b> <span class="pct">100%</span></td><td class="y">1,234,079 <span class="pct">78%</span></td><td class="y">1,535,094 <span class="pct">97%</span></td><td class="r">125,652 <span class="pct">8.0%</span></td><td>0</td><td>0</td></tr>
+<tr><td>128</td><td>16</td><td class="g"><b>2,770,733</b> <span class="pct">100%</span></td><td class="y">1,877,974 <span class="pct">68%</span></td><td class="y">1,656,611 <span class="pct">60%</span></td><td class="r">366,695 <span class="pct">13%</span></td><td>0</td><td>0</td></tr>
+<tr><td>128</td><td>32</td><td class="g"><b>3,134,421</b> <span class="pct">100%</span></td><td class="y">2,558,376 <span class="pct">82%</span></td><td class="y">1,711,723 <span class="pct">55%</span></td><td class="r">847,550 <span class="pct">27%</span></td><td>0</td><td>0</td></tr>
+<tr><td>128</td><td>64</td><td class="y">3,345,294 <span class="pct">98%</span></td><td class="y">2,504,651 <span class="pct">74%</span></td><td class="r">1,700,450 <span class="pct">50%</span></td><td class="g"><b>3,397,904</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>256</td><td>1</td><td class="g"><b>1,008,129</b> <span class="pct">100%</span></td><td class="y">640,758 <span class="pct">64%</span></td><td class="y">581,318 <span class="pct">58%</span></td><td class="r">19,598 <span class="pct">1.9%</span></td><td>0</td><td>0</td></tr>
+<tr><td>256</td><td>2</td><td class="g"><b>943,434</b> <span class="pct">100%</span></td><td class="y">656,243 <span class="pct">70%</span></td><td class="y">797,156 <span class="pct">84%</span></td><td class="r">29,302 <span class="pct">3.1%</span></td><td>0</td><td>0</td></tr>
+<tr><td>256</td><td>8</td><td class="y">1,076,192 <span class="pct">76%</span></td><td class="y">856,668 <span class="pct">61%</span></td><td class="g"><b>1,410,880</b> <span class="pct">100%</span></td><td class="r">255,954 <span class="pct">18%</span></td><td>0</td><td>0</td></tr>
+<tr><td>256</td><td>16</td><td class="g"><b>1,736,952</b> <span class="pct">100%</span></td><td class="y">1,272,368 <span class="pct">73%</span></td><td class="y">1,449,422 <span class="pct">83%</span></td><td class="r">535,960 <span class="pct">31%</span></td><td>0</td><td>0</td></tr>
+<tr><td>256</td><td>32</td><td class="g"><b>2,147,708</b> <span class="pct">100%</span></td><td class="y">1,809,916 <span class="pct">84%</span></td><td class="y">1,508,840 <span class="pct">70%</span></td><td class="r">1,313,721 <span class="pct">61%</span></td><td>0</td><td>0</td></tr>
+<tr><td>256</td><td>64</td><td class="y">2,583,122 <span class="pct">85%</span></td><td class="y">2,333,624 <span class="pct">77%</span></td><td class="r">1,601,963 <span class="pct">53%</span></td><td class="g"><b>3,034,838</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>512</td><td>1</td><td class="g"><b>977,626</b> <span class="pct">100%</span></td><td class="y">588,681 <span class="pct">60%</span></td><td class="y">505,699 <span class="pct">52%</span></td><td class="r">26,587 <span class="pct">2.7%</span></td><td>0</td><td>0</td></tr>
+<tr><td>512</td><td>2</td><td class="g"><b>913,240</b> <span class="pct">100%</span></td><td class="y">647,128 <span class="pct">71%</span></td><td class="y">795,878 <span class="pct">87%</span></td><td class="r">53,922 <span class="pct">5.9%</span></td><td>0</td><td>0</td></tr>
+<tr><td>512</td><td>8</td><td class="y">1,064,309 <span class="pct">79%</span></td><td class="y">932,018 <span class="pct">69%</span></td><td class="g"><b>1,342,392</b> <span class="pct">100%</span></td><td class="r">273,380 <span class="pct">20%</span></td><td>0</td><td>120</td></tr>
+<tr><td>512</td><td>16</td><td class="y">1,171,369 <span class="pct">88%</span></td><td class="y">831,299 <span class="pct">62%</span></td><td class="g"><b>1,333,282</b> <span class="pct">100%</span></td><td class="r">815,468 <span class="pct">61%</span></td><td>804</td><td>724</td></tr>
+<tr><td>512</td><td>32</td><td class="g"><b>1,595,957</b> <span class="pct">100%</span></td><td class="y">1,352,507 <span class="pct">85%</span></td><td class="y">1,490,075 <span class="pct">93%</span></td><td class="r">1,203,139 <span class="pct">75%</span></td><td>703</td><td>0</td></tr>
+<tr><td>512</td><td>64</td><td class="y">2,010,507 <span class="pct">76%</span></td><td class="y">1,820,298 <span class="pct">69%</span></td><td class="r">1,592,426 <span class="pct">60%</span></td><td class="g"><b>2,643,559</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
 </table>
-<p>Failures: h3x dropped 804 requests at 512×16 and 703 at 512×32; every other cell finished 0-fail
-for both clients. h2load's HTTP/3 engine stalls at low multiplexing (~100–200 req/s per connection
-at m=1–2) — those cells measure the client, not the server. Single unpinned runs: ratios under
-~1.5x are within run-to-run noise.</p>
+</div>
+
+<div class="panel" id="p2">
+<h4>vs nginx (OpenSSL-QUIC, docker, 12 workers)</h4>
+<table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:18%"><col span="2" style="width:8%"></colgroup><tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h3x spc req/s</th><th>h2o-httpclient req/s</th><th>h2load req/s</th><th>h3x drops</th><th>spc drops</th></tr>
+<tr><td>64</td><td>1</td><td class="y">507,998 <span class="pct">91%</span></td><td class="r">407,282 <span class="pct">73%</span></td><td class="y">499,132 <span class="pct">89%</span></td><td class="g"><b>560,188</b> <span class="pct">100%</span></td><td>2</td><td>0</td></tr>
+<tr><td>64</td><td>2</td><td class="y">611,570 <span class="pct">75%</span></td><td class="r">452,746 <span class="pct">55%</span></td><td class="y">589,304 <span class="pct">72%</span></td><td class="g"><b>820,102</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>64</td><td>8</td><td class="y">875,160 <span class="pct">65%</span></td><td class="y">679,757 <span class="pct">50%</span></td><td class="r">679,683 <span class="pct">50%</span></td><td class="g"><b>1,353,200</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>64</td><td>16</td><td class="y">1,021,713 <span class="pct">64%</span></td><td class="y">765,367 <span class="pct">48%</span></td><td class="r">696,216 <span class="pct">44%</span></td><td class="g"><b>1,585,622</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>64</td><td>32</td><td class="y">1,049,344 <span class="pct">64%</span></td><td class="y">892,187 <span class="pct">55%</span></td><td class="r">683,582 <span class="pct">42%</span></td><td class="g"><b>1,628,570</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>64</td><td>64</td><td class="y">1,147,004 <span class="pct">70%</span></td><td class="y">871,544 <span class="pct">53%</span></td><td class="r">711,043 <span class="pct">43%</span></td><td class="g"><b>1,648,319</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>128</td><td>1</td><td class="y">533,248 <span class="pct">96%</span></td><td class="r">374,300 <span class="pct">67%</span></td><td class="y">470,220 <span class="pct">85%</span></td><td class="g"><b>555,676</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>128</td><td>2</td><td class="y">518,623 <span class="pct">66%</span></td><td class="r">380,109 <span class="pct">48%</span></td><td class="y">479,485 <span class="pct">61%</span></td><td class="g"><b>784,103</b> <span class="pct">100%</span></td><td>16</td><td>0</td></tr>
+<tr><td>128</td><td>8</td><td class="y">732,800 <span class="pct">58%</span></td><td class="r">528,212 <span class="pct">41%</span></td><td class="y">531,661 <span class="pct">42%</span></td><td class="g"><b>1,273,322</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
+<tr><td>128</td><td>16</td><td class="y">861,809 <span class="pct">62%</span></td><td class="y">625,525 <span class="pct">45%</span></td><td class="r">581,944 <span class="pct">42%</span></td><td class="g"><b>1,387,994</b> <span class="pct">100%</span></td><td>371</td><td>0</td></tr>
+<tr><td>128</td><td>32</td><td class="y">959,687 <span class="pct">64%</span></td><td class="y">683,813 <span class="pct">46%</span></td><td class="r">658,325 <span class="pct">44%</span></td><td class="g"><b>1,487,968</b> <span class="pct">100%</span></td><td>858</td><td>0</td></tr>
+<tr><td>128</td><td>64</td><td class="y">1,044,810 <span class="pct">67%</span></td><td class="y">776,648 <span class="pct">50%</span></td><td class="r">695,814 <span class="pct">45%</span></td><td class="g"><b>1,549,483</b> <span class="pct">100%</span></td><td>1,498</td><td>0</td></tr>
+<tr><td>256</td><td>1</td><td class="y">519,302 <span class="pct">99%</span></td><td class="r">359,692 <span class="pct">68%</span></td><td class="y">446,619 <span class="pct">85%</span></td><td class="g"><b>526,289</b> <span class="pct">100%</span></td><td>24</td><td>0</td></tr>
+<tr><td>256</td><td>2</td><td class="y">554,124 <span class="pct">72%</span></td><td class="r">373,876 <span class="pct">49%</span></td><td class="y">456,137 <span class="pct">59%</span></td><td class="g"><b>769,199</b> <span class="pct">100%</span></td><td>15</td><td>0</td></tr>
+<tr><td>256</td><td>8</td><td class="y">623,976 <span class="pct">52%</span></td><td class="r">500,572 <span class="pct">42%</span></td><td class="y">506,681 <span class="pct">42%</span></td><td class="g"><b>1,194,853</b> <span class="pct">100%</span></td><td>520</td><td>0</td></tr>
+<tr><td>256</td><td>16</td><td class="y">780,949 <span class="pct">58%</span></td><td class="r">589,497 <span class="pct">44%</span></td><td class="y">608,960 <span class="pct">45%</span></td><td class="g"><b>1,352,111</b> <span class="pct">100%</span></td><td>1,172</td><td>0</td></tr>
+<tr><td>256</td><td>32</td><td class="y">878,087 <span class="pct">63%</span></td><td class="r">467,671 <span class="pct">34%</span></td><td class="y">692,947 <span class="pct">50%</span></td><td class="g"><b>1,390,804</b> <span class="pct">100%</span></td><td>709</td><td>0</td></tr>
+<tr><td>256</td><td>64</td><td class="r">633,603 <span class="pct">43%</span></td><td class="y">689,504 <span class="pct">47%</span></td><td class="y">713,916 <span class="pct">48%</span></td><td class="g"><b>1,475,488</b> <span class="pct">100%</span></td><td>5,014</td><td>0</td></tr>
+<tr><td>512</td><td>1</td><td class="g"><b>488,503</b> <span class="pct">100%</span></td><td class="r">376,157 <span class="pct">77%</span></td><td class="y">391,651 <span class="pct">80%</span></td><td class="y">483,681 <span class="pct">99%</span></td><td>24</td><td>0</td></tr>
+<tr><td>512</td><td>2</td><td class="y">520,786 <span class="pct">72%</span></td><td class="r">387,459 <span class="pct">54%</span></td><td class="y">425,866 <span class="pct">59%</span></td><td class="g"><b>721,959</b> <span class="pct">100%</span></td><td>117</td><td>0</td></tr>
+<tr><td>512</td><td>8</td><td class="y">588,501 <span class="pct">50%</span></td><td class="r">489,606 <span class="pct">42%</span></td><td class="y">564,968 <span class="pct">48%</span></td><td class="g"><b>1,171,295</b> <span class="pct">100%</span></td><td>447</td><td>214</td></tr>
+<tr><td>512</td><td>16</td><td class="y">502,532 <span class="pct">40%</span></td><td class="r">340,929 <span class="pct">27%</span></td><td class="y">662,338 <span class="pct">52%</span></td><td class="g"><b>1,263,867</b> <span class="pct">100%</span></td><td>1,406</td><td>0</td></tr>
+<tr><td>512</td><td>32</td><td class="y">569,147 <span class="pct">42%</span></td><td class="r">547,773 <span class="pct">40%</span></td><td class="y">709,965 <span class="pct">52%</span></td><td class="g"><b>1,370,700</b> <span class="pct">100%</span></td><td>3,293</td><td>0</td></tr>
+<tr><td>512</td><td>64</td><td class="r">594,501 <span class="pct">43%</span></td><td class="y">713,189 <span class="pct">52%</span></td><td class="y">750,774 <span class="pct">54%</span></td><td class="g"><b>1,382,457</b> <span class="pct">100%</span></td><td>3,754</td><td>2,744</td></tr>
+</table>
+</div>
+
+<div class="panel" id="p3">
+<h4>vs haproxy (HAProxy QUIC, docker, nbthread 12)</h4>
+<table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:18%"><col span="2" style="width:8%"></colgroup><tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h3x spc req/s</th><th>h2o-httpclient req/s</th><th>h2load req/s</th><th>h3x drops</th><th>spc drops</th></tr>
+<tr><td>64</td><td>1</td><td class="g"><b>501,638</b> <span class="pct">100%</span></td><td class="y">461,700 <span class="pct">92%</span></td><td class="y">458,792 <span class="pct">91%</span></td><td class="r">409,628 <span class="pct">82%</span></td><td>4</td><td>0</td></tr>
+<tr><td>64</td><td>2</td><td class="g"><b>593,757</b> <span class="pct">100%</span></td><td class="y">537,263 <span class="pct">90%</span></td><td class="r">486,394 <span class="pct">82%</span></td><td class="y">519,830 <span class="pct">88%</span></td><td>18</td><td>0</td></tr>
+<tr><td>64</td><td>8</td><td class="g"><b>834,017</b> <span class="pct">100%</span></td><td class="y">760,593 <span class="pct">91%</span></td><td class="r">586,024 <span class="pct">70%</span></td><td class="y">737,189 <span class="pct">88%</span></td><td>24</td><td>0</td></tr>
+<tr><td>64</td><td>16</td><td class="g"><b>1,193,653</b> <span class="pct">100%</span></td><td class="y">1,130,706 <span class="pct">95%</span></td><td class="r">777,151 <span class="pct">65%</span></td><td class="y">958,858 <span class="pct">80%</span></td><td>120</td><td>0</td></tr>
+<tr><td>64</td><td>32</td><td class="g"><b>1,372,950</b> <span class="pct">100%</span></td><td class="y">1,346,794 <span class="pct">98%</span></td><td class="r">929,701 <span class="pct">68%</span></td><td class="y">1,238,902 <span class="pct">90%</span></td><td>384</td><td>0</td></tr>
+<tr><td>64</td><td>64</td><td class="g"><b>1,431,141</b> <span class="pct">100%</span></td><td class="y">1,425,447 <span class="pct">100%</span></td><td class="r">1,074,616 <span class="pct">75%</span></td><td class="y">1,377,461 <span class="pct">96%</span></td><td>288</td><td>0</td></tr>
+<tr><td>128</td><td>1</td><td class="g"><b>509,154</b> <span class="pct">100%</span></td><td class="y">462,512 <span class="pct">91%</span></td><td class="r">392,484 <span class="pct">77%</span></td><td class="y">462,545 <span class="pct">91%</span></td><td>16</td><td>0</td></tr>
+<tr><td>128</td><td>2</td><td class="g"><b>558,959</b> <span class="pct">100%</span></td><td class="y">524,296 <span class="pct">94%</span></td><td class="r">416,965 <span class="pct">75%</span></td><td class="y">530,206 <span class="pct">95%</span></td><td>60</td><td>0</td></tr>
+<tr><td>128</td><td>8</td><td class="g"><b>908,644</b> <span class="pct">100%</span></td><td class="y">864,240 <span class="pct">95%</span></td><td class="r">510,760 <span class="pct">56%</span></td><td class="y">685,602 <span class="pct">75%</span></td><td>187</td><td>0</td></tr>
+<tr><td>128</td><td>16</td><td class="y">1,106,939 <span class="pct">96%</span></td><td class="g"><b>1,153,717</b> <span class="pct">100%</span></td><td class="r">719,554 <span class="pct">62%</span></td><td class="y">927,248 <span class="pct">80%</span></td><td>364</td><td>0</td></tr>
+<tr><td>128</td><td>32</td><td class="y">1,218,556 <span class="pct">96%</span></td><td class="g"><b>1,267,559</b> <span class="pct">100%</span></td><td class="r">850,144 <span class="pct">67%</span></td><td class="y">1,082,862 <span class="pct">85%</span></td><td>2,544</td><td>0</td></tr>
+<tr><td>128</td><td>64</td><td class="y">1,243,373 <span class="pct">96%</span></td><td class="g"><b>1,288,655</b> <span class="pct">100%</span></td><td class="r">925,740 <span class="pct">72%</span></td><td class="y">1,153,955 <span class="pct">90%</span></td><td>3,851</td><td>0</td></tr>
+<tr><td>256</td><td>1</td><td class="g"><b>510,760</b> <span class="pct">100%</span></td><td class="y">492,689 <span class="pct">96%</span></td><td class="r">353,909 <span class="pct">69%</span></td><td class="y">476,616 <span class="pct">93%</span></td><td>61</td><td>0</td></tr>
+<tr><td>256</td><td>2</td><td class="g"><b>557,303</b> <span class="pct">100%</span></td><td class="y">540,675 <span class="pct">97%</span></td><td class="r">400,481 <span class="pct">72%</span></td><td class="y">538,703 <span class="pct">97%</span></td><td>146</td><td>0</td></tr>
+<tr><td>256</td><td>8</td><td class="g"><b>647,722</b> <span class="pct">100%</span></td><td class="y">610,264 <span class="pct">94%</span></td><td class="r">470,801 <span class="pct">73%</span></td><td class="y">628,809 <span class="pct">97%</span></td><td>1,038</td><td>0</td></tr>
+<tr><td>256</td><td>16</td><td class="g"><b>847,377</b> <span class="pct">100%</span></td><td class="y">835,740 <span class="pct">99%</span></td><td class="r">643,948 <span class="pct">76%</span></td><td class="y">828,462 <span class="pct">98%</span></td><td>1,596</td><td>0</td></tr>
+<tr><td>256</td><td>32</td><td class="y">950,923 <span class="pct">96%</span></td><td class="g"><b>990,669</b> <span class="pct">100%</span></td><td class="r">694,476 <span class="pct">70%</span></td><td class="y">913,045 <span class="pct">92%</span></td><td>3,808</td><td>0</td></tr>
+<tr><td>256</td><td>64</td><td class="y">1,051,092 <span class="pct">95%</span></td><td class="g"><b>1,105,960</b> <span class="pct">100%</span></td><td class="r">688,375 <span class="pct">62%</span></td><td class="y">909,548 <span class="pct">82%</span></td><td>7,914</td><td>0</td></tr>
+<tr><td>512</td><td>1</td><td class="g"><b>503,065</b> <span class="pct">100%</span></td><td class="y">473,621 <span class="pct">94%</span></td><td class="r">309,655 <span class="pct">62%</span></td><td class="y">455,408 <span class="pct">91%</span></td><td>260</td><td>0</td></tr>
+<tr><td>512</td><td>2</td><td class="g"><b>536,284</b> <span class="pct">100%</span></td><td class="y">514,906 <span class="pct">96%</span></td><td class="r">354,945 <span class="pct">66%</span></td><td class="y">506,904 <span class="pct">95%</span></td><td>330</td><td>0</td></tr>
+<tr><td>512</td><td>8</td><td class="y">495,827 <span class="pct">91%</span></td><td class="y">525,314 <span class="pct">97%</span></td><td class="r">399,137 <span class="pct">73%</span></td><td class="g"><b>543,304</b> <span class="pct">100%</span></td><td>2,319</td><td>0</td></tr>
+<tr><td>512</td><td>16</td><td class="y">533,381 <span class="pct">84%</span></td><td class="y">539,657 <span class="pct">85%</span></td><td class="r">507,338 <span class="pct">80%</span></td><td class="g"><b>633,767</b> <span class="pct">100%</span></td><td>4,454</td><td>0</td></tr>
+<tr><td>512</td><td>32</td><td class="y">663,604 <span class="pct">95%</span></td><td class="g"><b>699,933</b> <span class="pct">100%</span></td><td class="r">574,446 <span class="pct">82%</span></td><td class="y">674,357 <span class="pct">96%</span></td><td>11,137</td><td>0</td></tr>
+<tr><td>512</td><td>64</td><td class="y">830,796 <span class="pct">98%</span></td><td class="y">843,399 <span class="pct">100%</span></td><td class="r">612,756 <span class="pct">72%</span></td><td class="g"><b>846,605</b> <span class="pct">100%</span></td><td>36,631</td><td>0</td></tr>
+</table>
+</div>
+
+<details><summary>Notes: methodology, caveats, per-client error behavior</summary>
+<p>h2load dropped 0 requests in all 72 cells. The h2load collapse at m=1-2 happens only against h2o
+(7k-54k req/s there vs 480k-820k against nginx and 410k-540k against haproxy): a pairing-specific
+interaction between ngtcp2 and the quicly server at low concurrency, not general client behavior.
+Against nginx the picture inverts for h3x: no GSO-batched responses means its GRO cannot engage,
+quicly pays full per-packet receive cost, and h2load leads everywhere above m=1. Against haproxy
+h3x and h2load tie within noise on throughput. h2o-httpclient error lines were negligible
+(2-7 per cell, process-teardown artifacts) in every cell against nginx and up to 256 conns against
+h2o and haproxy; real volumes appeared only at 512 conns against h2o (516 at m=2, 2,051 at m=8,
+8,200 at m=32, 16,387 at m=64, uncharacterized by type) and mildly against haproxy (35-195).
+The spc column: zero drops in all 24 haproxy cells and nearly all nginx and h2o cells (residuals
+at 512 conns are the separate handshake-timeout tail); its throughput cost vs shared-socket mode
+is largest against h2o at 128+ conns (up to ~35%, the shared model's home ground: one socket to
+poll and batched sends), and roughly par or slightly ahead against haproxy. Single unpinned runs:
+differences under ~1.5x are within run-to-run noise.</p>
+</details>
+
+<details><summary>Why h3x (shared-socket mode) drops requests: root-caused</summary>
+<p>The trigger is multiplexing
+many QUIC connections over one UDP socket per worker. Differential tests against haproxy: one
+connection per socket is flawless (32 conns / 32 sockets: 7.19M requests, 0 drops, 0 re-dials;
+thread-count controlled separately with 4 conns / 4 sockets, also 0/0), while 8 connections per
+socket, same 32 connections and same multiplexing, drops 1,428 and re-dials constantly (355k
+requests on resumed connections in 5 s, with no reconnect flag). Confirmed at scale by the
+h2o-httpclient grids and the spc column above. Servers differ in how they tolerate multiple
+QUIC connections sharing a 4-tuple: h2o accepts it (this is h2o's own client architecture), nginx
+churns moderately, haproxy constantly. Every drop surfaces as "I/O error" at stream attach: a
+shared-socket connection dies, whatever was in flight on it fails, the pool re-dials with the
+cached ticket, and the run continues, so throughput barely dips while the drop counter grows. The
+close reason on the wire is still unread (CONNECTION_CLOSE is encrypted; reading it needs
+SSLKEYLOGFILE wiring), and against nginx there is additionally a smaller classic handshake-timeout
+tail under saturation (2,559 churn errors vs 489 timeouts in the probed cell). Fix:
+<code>--socket-per-conn</code> (one socket per connection, the h2load model), the spc column.</p>
+</details>
 </body>
 </html>
