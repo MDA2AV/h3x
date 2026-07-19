@@ -1,31 +1,33 @@
 # h3x
-Experimental HTTP/3 load generator using libh2o. As usual, unbuckled seatbelt — use at your own risk.
+Experimental HTTP/3 load generator using libh2o. As usual, unbuckled seatbelt. Use at your own risk.
 
 ## Build
 
 ```sh
-git submodule update --init        # deps/h2o (brings quicly + picotls)
+git submodule update --init
+git -C deps/h2o apply "$(pwd)/patches/h2o-udp-gro-send-batch.patch"  # local h2o patches (patches/README.md)
 cmake -S . -B build && cmake --build build --target h3x
-./build/h3x -h
 ```
 
-Needs a C toolchain, CMake, and OpenSSL headers; links h2o's evloop backend (`libh2o-evloop`).
-`deps/h2o` carries local patches: UDP GRO on the receive path (+14–19% against batching servers)
-and cross-connection `sendmmsg` batching on the send path (the `batch_sends` layer that
-`--send-batch` feeds). Neither is upstream, so a `git submodule update` wipes them — see
-[`patches/README.md`](patches/README.md) to reapply or revert.
+## Run the servers
 
-## Usage
-
-```
-h3x [options] <url>
+```sh
+cmake --build build --target h2o                       # once, builds the h2o server binary
+build/deps/h2o/h2o -c bench/h2o.conf &                 # h2o (native)      https://127.0.0.1:14433/
+docker start nginx-h3 haproxy-h3 caddy-h3 envoy-h3     # 14434 / 14435 / 14436 / 14437
 ```
 
-Each worker thread drives its share of `--connections` over a single UDP socket and event loop, so
-connections can far exceed threads (`-t 8 --connections 1024` puts 128 on each thread). Requests in
-flight = `connections × -c`. Leaving `-t` unset uses every CPU the process is allowed (honoring
-cpusets and quotas — the intent under Docker). The end-of-run summary prints requests, resumed
-connections, throughput, and latency percentiles.
+Server configs live in `bench/` (bind-mounted into the containers); every server runs 12 workers
+and serves the 1 KB `bench/doc_root/index.html`.
+
+## Run the load generator
+
+```sh
+./build/h3x -k --connections 512 -c 8 -d 10 https://127.0.0.1:14433/
+```
+
+Threads default to one worker per CPU the process may use; connections are spread across the
+threads; requests in flight = `connections × -c`.
 
 | Flag | Meaning (default) |
 |------|-------------------|
@@ -51,16 +53,4 @@ connections, throughput, and latency percentiles.
 | `--no-ecn` | disable ECN |
 | `--qpack-table <bytes>` | QPACK encoder dynamic table capacity (4096) |
 
-Resumption is on by default. Certificate verification uses the system CA bundle
-(`/etc/ssl/certs/ca-certificates.crt`); override with `H3X_CA_BUNDLE`.
-
-## Examples
-
-```sh
-./build/h3x -n 1000 -c 50 -t 4 https://example.com/                    # basic load
-./build/h3x -n 100 --reconnect 1 https://example.com/                  # resumption / 0-RTT on
-./build/h3x -n 100 --reconnect 1 --no-resumption https://example.com/  # vs full handshake each time
-```
-
-Benchmarks against h2load across five QUIC servers live in `bench/` (`run.sh`; results in
-`results.html`, send-batch A/B in `sb-sweep.sh`).
+Certificate verification uses the system CA bundle; override with `H3X_CA_BUNDLE`.
