@@ -1,5 +1,6 @@
-/* Request lifecycle: the closed-loop driver's start/finish path and the
- * httpclient callbacks (connect -> head -> body). */
+/* The closed-loop load driver: the per-request start/finish path, the run-budget checks, and the
+ * httpclient callbacks (connect -> head -> body). Worker threads (worker.c) call start_one in a
+ * loop; each request's callbacks fill the request and consume the response. */
 #include <stdlib.h>
 #include <string.h>
 #include "h3x.h"
@@ -9,6 +10,7 @@ struct req_ctx {
     struct worker *w;
     struct timeval start;
     unsigned conn_idx; /* connpool this request was dispatched to (for establishment tracking) */
+    unsigned req_idx;  /* index into conf.requests (request-mix mode; unused otherwise) */
 };
 
 static h2o_httpclient_head_cb on_connect(h2o_httpclient_t *client, const char *errstr, h2o_iovec_t *method, h2o_url_t *url,
@@ -108,6 +110,10 @@ void start_one(struct worker *w)
      * connection pool handles reuse and re-establishment. Round-robin across the worker's pools so
      * requests spread evenly over its connections, each carrying ~concurrency streams. */
     rc->conn_idx = w->rr;
+    if (conf.requests != NULL) { /* pick the next request in the mix, round-robin per worker */
+        rc->req_idx = w->req_rr;
+        w->req_rr = (w->req_rr + 1) % conf.num_requests;
+    }
     h2o_httpclient_connection_pool_t *cp = &w->connpools[w->rr];
     w->rr = (w->rr + 1) % w->active_conns;
     /* in --socket-per-conn mode each connection has its own client ctx (own quic ctx + socket) */
@@ -126,15 +132,28 @@ static h2o_httpclient_head_cb on_connect(h2o_httpclient_t *client, const char *e
         return NULL;
     }
 
-    *method = h2o_iovec_init(conf.method, strlen(conf.method));
-    *url = rc->w->target;
     h2o_headers_t headers_vec = {NULL};
-    for (size_t i = 0; i != conf.num_headers; ++i)
-        h2o_add_header_by_str(client->pool, &headers_vec, conf.headers[i].name.base, conf.headers[i].name.len, 1, NULL,
-                              conf.headers[i].value.base, conf.headers[i].value.len);
+    if (conf.requests != NULL) {
+        /* request-mix mode: method, path, headers, and body come from the --requests template.
+         * Authority and scheme stay from the target URL - only the path is overridden. */
+        struct request *r = &conf.requests[rc->req_idx];
+        *method = r->method;
+        *url = rc->w->target;
+        url->path = r->path;
+        for (size_t i = 0; i != r->num_headers; ++i)
+            h2o_add_header_by_str(client->pool, &headers_vec, r->headers[i].name.base, r->headers[i].name.len, 1, NULL,
+                                  r->headers[i].value.base, r->headers[i].value.len);
+        *body = r->body; /* .base==NULL => no body; sent in one shot (no proceed_req streaming) */
+    } else {
+        *method = h2o_iovec_init(conf.method, strlen(conf.method));
+        *url = rc->w->target;
+        for (size_t i = 0; i != conf.num_headers; ++i)
+            h2o_add_header_by_str(client->pool, &headers_vec, conf.headers[i].name.base, conf.headers[i].name.len, 1, NULL,
+                                  conf.headers[i].value.base, conf.headers[i].value.len);
+        *body = h2o_iovec_init(NULL, 0);
+    }
     *headers = headers_vec.entries;
     *num_headers = headers_vec.size;
-    *body = h2o_iovec_init(NULL, 0);
     *proceed_req_cb = NULL;
     return on_head;
 }

@@ -74,6 +74,9 @@ static void usage(void)
             "                    fewer datagrams (1 = off; helps server-bound, hurts client-bound)\n"
             "  --socket-per-conn one UDP socket per connection (unique 4-tuple, the h2load model;\n"
             "                    avoids servers that kill connections sharing a source port)\n"
+            "  --requests <file> load request templates (method/path/headers/body) from a .http file;\n"
+            "                    multiple requests become a round-robin mix (overrides -m/-H)\n"
+            "  --dump-requests   parse --requests and print the result, then exit\n"
             "  --no-resumption   force a full handshake on every connection\n"
             "  --max-udp-payload-size <bytes>\n"
             "  --initial-udp-payload-size <bytes>\n"
@@ -134,6 +137,8 @@ int main(int argc, char **argv)
         OPT_SEND_BATCH,
         OPT_CONNECTIONS,
         OPT_SOCKET_PER_CONN,
+        OPT_REQUESTS,
+        OPT_DUMP_REQUESTS,
     };
     static struct option longopts[] = {{"max-udp-payload-size", required_argument, NULL, OPT_MAX_UDP},
                                         {"initial-udp-payload-size", required_argument, NULL, OPT_INIT_UDP},
@@ -147,8 +152,11 @@ int main(int argc, char **argv)
                                         {"send-batch", required_argument, NULL, OPT_SEND_BATCH},
                                         {"connections", required_argument, NULL, OPT_CONNECTIONS},
                                         {"socket-per-conn", no_argument, NULL, OPT_SOCKET_PER_CONN},
+                                        {"requests", required_argument, NULL, OPT_REQUESTS},
+                                        {"dump-requests", no_argument, NULL, OPT_DUMP_REQUESTS},
                                         {"help", no_argument, NULL, 'h'},
                                         {NULL}};
+    int dump_requests = 0;
     int opt;
     while ((opt = getopt_long(argc, argv, "n:c:t:d:m:H:x:W:kh", longopts, NULL)) != -1) {
         switch (opt) {
@@ -216,6 +224,12 @@ int main(int argc, char **argv)
         case OPT_SOCKET_PER_CONN:
             conf.socket_per_conn = 1;
             break;
+        case OPT_REQUESTS:
+            conf.requests_file = optarg;
+            break;
+        case OPT_DUMP_REQUESTS:
+            dump_requests = 1;
+            break;
         case 'h':
             usage();
             return 0;
@@ -226,6 +240,26 @@ int main(int argc, char **argv)
     }
     argc -= optind;
     argv += optind;
+
+    if (conf.requests_file != NULL)
+        load_requests(conf.requests_file);
+    if (dump_requests) { /* inspect what was parsed, then exit (no URL needed) */
+        if (conf.requests == NULL) {
+            fprintf(stderr, "--dump-requests needs --requests <file>\n");
+            return EXIT_FAILURE;
+        }
+        for (size_t i = 0; i < conf.num_requests; ++i) {
+            struct request *r = &conf.requests[i];
+            printf("[%zu] %.*s %.*s\n", i, (int)r->method.len, r->method.base, (int)r->path.len, r->path.base);
+            for (size_t j = 0; j < r->num_headers; ++j)
+                printf("      %.*s: %.*s\n", (int)r->headers[j].name.len, r->headers[j].name.base,
+                       (int)r->headers[j].value.len, r->headers[j].value.base);
+            if (r->body.base != NULL)
+                printf("      body: %zu bytes\n", r->body.len);
+        }
+        return 0;
+    }
+
     if (argc < 1) {
         usage();
         return EXIT_FAILURE;

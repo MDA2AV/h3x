@@ -1,0 +1,16 @@
+# Simple GET mix: three paths, round-robined by each worker.
+# Lines starting with # (outside a body) are comments. The authority (host:port)
+# always comes from the URL on the h3x command line; the file only sets
+# method, path, headers, and body.
+
+GET /
+
+###
+
+GET /index.html
+x-bench-tag: static
+
+###
+
+GET /assets/app.css
+accept: text/css

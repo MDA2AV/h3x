@@ -9,8 +9,9 @@
  * The per-connection setup mirrors h2o's httpclient.c.
  *
  * Layout: main.c (CLI parsing + thread lifecycle), worker.c (per-thread QUIC/TLS
- * context and the event loop), request.c (request lifecycle + client callbacks),
- * tls.c (session resumption callbacks), stats.c (latency samples + run summary).
+ * context and the event loop), driver.c (request lifecycle + client callbacks),
+ * requests.c (--requests .http file parser), tls.c (session resumption callbacks),
+ * stats.c (latency samples + run summary).
  */
 #ifndef H3X_H
 #define H3X_H
@@ -23,6 +24,21 @@
 #include "h2o/httpclient.h"
 
 #define DEFAULT_IO_TIMEOUT 5000
+
+/* One request template parsed from a --requests file (see requests.c). Read-only after
+ * load_requests; workers round-robin through the array to produce a request mix. The authority
+ * (:authority) is not here - it always comes from the command-line URL; this only carries what
+ * varies per request. */
+struct request {
+    h2o_iovec_t method;
+    h2o_iovec_t path;
+    struct {
+        h2o_iovec_t name;
+        h2o_iovec_t value;
+    } headers[64];
+    size_t num_headers;
+    h2o_iovec_t body; /* .base == NULL when the request has no body */
+};
 
 /* Read-only after main() finishes parsing; shared by every worker thread. */
 struct config {
@@ -56,6 +72,9 @@ struct config {
     uint32_t qpack_table;     /* --qpack-table (encoder dynamic table capacity) */
     const char *key_exchange; /* --key-exchange <name> */
     int socket_per_conn;      /* --socket-per-conn : one UDP socket per connection (h2load model) */
+    const char *requests_file; /* --requests <file> : request templates (method/path/headers/body) */
+    struct request *requests;  /* parsed from requests_file; NULL => use -m/-H with a single path */
+    size_t num_requests;
 };
 extern struct config conf;
 
@@ -100,6 +119,7 @@ struct worker {
     struct conn_unit *units; /* --socket-per-conn: one per connection; NULL in shared-socket mode */
     unsigned n_conns; /* number of connections (pools) this worker drives */
     unsigned rr;      /* round-robin index for dispatching the next request to a connection */
+    unsigned req_rr;  /* round-robin index into conf.requests (request-mix mode) */
     unsigned active_conns; /* connpools currently in rotation; ramps up from CONN_RAMP_INITIAL */
     unsigned established;  /* connpools whose first request has completed (paces the ramp) */
     uint8_t *conn_up;      /* per-connpool: 1 once its connection's first request completed */
@@ -123,11 +143,14 @@ extern struct timeval g_deadline;
 /* worker.c */
 void *worker_main(void *arg);
 
-/* request.c */
+/* driver.c */
 void start_one(struct worker *w);
 int may_start(struct worker *w);
 int overall_has_more(struct worker *w);
 void close_and_drain(struct worker *w);
+
+/* requests.c */
+void load_requests(const char *path);
 
 /* tls.c */
 int load_session_cb(h2o_httpclient_ctx_t *ctx, struct sockaddr *server_addr, const char *server_name,

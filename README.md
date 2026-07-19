@@ -38,6 +38,7 @@ threads; requests in flight = `connections × -c`.
 | `-c <num>` | concurrent streams per connection (10) |
 | `--send-batch <n>` | hold N freed slots before refilling, so requests pack into fewer datagrams (1 = off) |
 | `--socket-per-conn` | one UDP socket per connection (unique 4-tuple, the h2load model); avoids servers that kill connections sharing a source port |
+| `--requests <file>` | load request templates (method/path/headers/body) from a `.http` file; multiple requests become a round-robin mix (overrides `-m`/`-H`). See `examples/`, and `--dump-requests` to check parsing |
 | `-m <method>` | request method (`GET`) |
 | `-H <name:value>` | add a request header (repeatable) |
 | `-x <url>` | connect to this host:port instead of the URL's (pin a backend / skip DNS) |

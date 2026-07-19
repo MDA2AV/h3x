@@ -11,7 +11,8 @@ add_subdirectory(deps/h2o EXCLUDE_FROM_ALL)
 add_executable(h3x
     src/main.c
     src/worker.c
-    src/request.c
+    src/driver.c
+    src/requests.c
     src/tls.c
     src/stats.c)
 

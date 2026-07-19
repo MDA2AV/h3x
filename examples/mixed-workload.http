@@ -1,0 +1,32 @@
+# A realistic mixed workload. Workers round-robin through entries in order, so
+# repetition = weighting: this file sends 3 GETs for every POST/PUT/DELETE.
+
+GET /api/items
+accept: application/json
+
+###
+
+GET /api/items
+
+###
+
+GET /api/items/42
+
+###
+
+POST /api/items
+content-type: application/json
+
+{"name":"widget","qty":3}
+
+###
+
+PUT /api/items/42
+content-type: application/json
+if-match: "v7"
+
+{"name":"widget","qty":4}
+
+###
+
+DELETE /api/items/17
