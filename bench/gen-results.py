@@ -145,7 +145,7 @@ build/deps/h2o/h2o -c bench/h2o.conf &amp;
 docker start nginx-h3 haproxy-h3        # :14434 / :14435
 
 # one cell, by hand: 512 connections x 8 streams for 10s against h2o
-build/h3x -k -t 32 --connections 512 -c 8 -d 10 https://127.0.0.1:14433/
+build/h3x -k -t 32 --connections 512 -m 8 -d 10 https://127.0.0.1:14433/
 
 # the full grid on this page: each script sweeps all three servers and writes bench/matrix*.log
 bash bench/matrix.sh              # h3x + h2load

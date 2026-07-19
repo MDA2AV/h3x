@@ -61,10 +61,10 @@ static void usage(void)
             "Usage: %s [options] <url>\n"
             "  -n <count>   total requests to send (default: 100)\n"
             "  -d <seconds> run for this long instead of -n (overrides -n)\n"
-            "  -c <num>     concurrent streams per connection (default: 10)\n"
+            "  -m <num>     concurrent streams per connection (default: 10)\n"
             "  --connections <n> total connections across all threads (default: one per thread)\n"
             "  -t <num>     worker threads (default: all CPUs available to the process)\n"
-            "  -m <method>  request method (default: GET)\n"
+            "  --method <method> request method (default: GET)\n"
             "  -H <name:value>   add a request header (repeatable)\n"
             "  -x <url>     connect to this host:port instead of the URL's (pins a backend)\n"
             "  -W <bytes>   HTTP/3 receive window (per stream)\n"
@@ -139,6 +139,7 @@ int main(int argc, char **argv)
         OPT_SOCKET_PER_CONN,
         OPT_REQUESTS,
         OPT_DUMP_REQUESTS,
+        OPT_METHOD,
     };
     static struct option longopts[] = {{"max-udp-payload-size", required_argument, NULL, OPT_MAX_UDP},
                                         {"initial-udp-payload-size", required_argument, NULL, OPT_INIT_UDP},
@@ -154,11 +155,12 @@ int main(int argc, char **argv)
                                         {"socket-per-conn", no_argument, NULL, OPT_SOCKET_PER_CONN},
                                         {"requests", required_argument, NULL, OPT_REQUESTS},
                                         {"dump-requests", no_argument, NULL, OPT_DUMP_REQUESTS},
+                                        {"method", required_argument, NULL, OPT_METHOD},
                                         {"help", no_argument, NULL, 'h'},
                                         {NULL}};
     int dump_requests = 0;
     int opt;
-    while ((opt = getopt_long(argc, argv, "n:c:t:d:m:H:x:W:kh", longopts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "n:m:t:d:H:x:W:kh", longopts, NULL)) != -1) {
         switch (opt) {
         case 'n':
             conf.total_requests = (unsigned)strtoul(optarg, NULL, 10);
@@ -166,13 +168,13 @@ int main(int argc, char **argv)
         case 'd':
             conf.duration = atof(optarg);
             break;
-        case 'c':
+        case 'm': /* concurrent streams per connection (h2load calls this -m too) */
             conf.concurrency = (unsigned)strtoul(optarg, NULL, 10);
             break;
         case 't':
             conf.threads = (unsigned)strtoul(optarg, NULL, 10);
             break;
-        case 'm':
+        case OPT_METHOD:
             conf.method = optarg;
             break;
         case 'H':

@@ -41,7 +41,7 @@ parse_h3x()    { awk '/throughput:/{r=$2} /completed:/{f=$4} END{printf "%d %d",
 parse_h2load() { awk -F'[ ,]+' '/finished in/{r=$4} /requests:/{f=$10} END{printf "%.0f %d", r+0, f+0}'; }
 
 run_h3x() {    # conns url  -> h3x, pinned to the client cores, threads auto-detected
-    taskset -c "$CLIENT_CPUS" build/h3x -k --connections "$1" -c "$M" -d "$D" "$2" 2>&1
+    taskset -c "$CLIENT_CPUS" build/h3x -k --connections "$1" -m "$M" -d "$D" "$2" 2>&1
 }
 run_h2load() { # conns url  -> h2load h3, pinned to the client cores
     local t=$(( $1 < 20 ? $1 : 20 ))   # h2load requires threads <= connections
@@ -54,7 +54,7 @@ bench_server() { # name url
     hr; echo "  SERVER: $name   ($url)"; hr
     for conns in $CONNS; do
         echo "-- $conns connections x $M streams, ${D}s --"
-        echo ">>> h3x    (taskset -c $CLIENT_CPUS, auto threads, --connections $conns -c $M)"
+        echo ">>> h3x    (taskset -c $CLIENT_CPUS, auto threads, --connections $conns -m $M)"
         out=$(run_h3x "$conns" "$url" || true); echo "$out" | grep -E 'throughput:|completed:' || true
         echo "RESULT $name h3x $conns $M $(printf '%s' "$out" | parse_h3x)"
         sleep "$COOLDOWN"

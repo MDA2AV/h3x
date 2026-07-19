@@ -34,7 +34,7 @@ TIMEFORMAT='TIMES %U %S %R'
             for b in 1 8; do
                 for run in $(seq "$RUNS"); do
                     s0=$(srv_usec "$name")
-                    out=$( { time build/h3x -k --connections "$conns" -c "$M" -d "$D" --send-batch "$b" "$url" 2>&1; } 2>&1 )
+                    out=$( { time build/h3x -k --connections "$conns" -m "$M" -d "$D" --send-batch "$b" "$url" 2>&1; } 2>&1 )
                     s1=$(srv_usec "$name")
                     rf=$(printf '%s' "$out" | parse)
                     lgreal=$(printf '%s\n' "$out" | awk '/^TIMES/{u=$2;s=$3;r=$4} END{if(r+0>0) printf "%.1f %.2f",(u+s)/r,r; else print "0 1"}')

@@ -16,7 +16,7 @@ for entry in "h2o https://127.0.0.1:14433/" "nginx https://127.0.0.1:14434/" "ha
         echo "MATRIX START $(date +%F' '%T) obj=$(stat -c%s bench/doc_root/index.html)B client=h3x--socket-per-conn server=$NAME t=$T d=$D sb=64 unpinned"
         for C in 64 128 256 512; do
             for M in 1 2 8 16 32 64; do
-                out=$(build/h3x -k -t $T --connections "$C" -c "$M" -d $D --send-batch 64 --socket-per-conn "$URL" 2>&1)
+                out=$(build/h3x -k -t $T --connections "$C" -m "$M" -d $D --send-batch 64 --socket-per-conn "$URL" 2>&1)
                 echo "RESULT h3x-spc conns=$C m=$M $(printf '%s' "$out" | awk '/throughput:/{r=$2} /completed:/{f=$4} END{printf "%d %d", r+0, f+0}') t=$(date +%T)"
                 sleep $COOL
             done
