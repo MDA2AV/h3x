@@ -32,6 +32,14 @@
 
 #define DEFAULT_IO_TIMEOUT 5000
 
+/* Connection-establishment pacing. Opening every connection's handshake at once floods a worker's
+ * event loop at high connection counts, and a chunk of the handshakes time out - the dominant
+ * failure source in the many-connection regime. Instead open an initial set and grow it only as
+ * connections come up, keeping the number of in-flight (not-yet-established) handshakes under a cap. */
+#define CONN_RAMP_INITIAL 32   /* handshakes a worker starts immediately */
+#define CONN_RAMP_STEP 8       /* connections added per loop pass while ramping */
+#define CONN_MAX_HANDSHAKES 32 /* cap on concurrent in-flight handshakes per worker */
+
 /* Read-only after main() finishes parsing; shared by every worker thread. */
 static struct {
     const char *url;
@@ -63,8 +71,6 @@ static struct {
     int no_ecn;               /* --no-ecn */
     uint32_t qpack_table;     /* --qpack-table (encoder dynamic table capacity) */
     const char *key_exchange; /* --key-exchange <name> */
-    int8_t http2_ratio;       /* -2 */
-    int8_t http3_ratio;       /* -3 (default 100; remainder falls back to HTTP/1) */
 } conf = {
     .method = "GET",
     .total_requests = 100,
@@ -73,7 +79,6 @@ static struct {
     .threads = 0,
     .io_timeout = DEFAULT_IO_TIMEOUT,
     .qpack_table = 4096,
-    .http3_ratio = 100,
 };
 
 static const char *progname;
@@ -105,12 +110,14 @@ struct worker {
     h2o_multithread_queue_t *queue;
     h2o_multithread_receiver_t getaddr_receiver;
     h2o_httpclient_connection_pool_t *connpools; /* one per connection this worker drives */
-    h2o_socketpool_t *sockpools;
+    h2o_socketpool_t sockpool;                   /* one shared by all this worker's connpools */
     unsigned n_conns; /* number of connections (pools) this worker drives */
     unsigned rr;      /* round-robin index for dispatching the next request to a connection */
+    unsigned active_conns; /* connpools currently in rotation; ramps up from CONN_RAMP_INITIAL */
+    unsigned established;  /* connpools whose first request has completed (paces the ramp) */
+    uint8_t *conn_up;      /* per-connpool: 1 once its connection's first request completed */
     h2o_url_t target;
     h2o_url_t connect_to;
-    SSL_CTX *ssl_ctx; /* only for the HTTP/1|2 (TCP+TLS) fraction */
     /* resumption */
     ptls_save_ticket_t save_ticket;
     quicly_save_resumption_token_t save_token;
@@ -126,6 +133,7 @@ struct worker {
 struct req_ctx {
     struct worker *w;
     struct timeval start;
+    unsigned conn_idx; /* connpool this request was dispatched to (for establishment tracking) */
 };
 
 static h2o_httpclient_head_cb on_connect(h2o_httpclient_t *client, const char *errstr, h2o_iovec_t *method, h2o_url_t *url,
@@ -250,6 +258,10 @@ static void request_done(h2o_httpclient_t *client, int ok)
     if (ok) {
         record_latency(w, &rc->start);
         ++w->n_ok;
+        if (!w->conn_up[rc->conn_idx]) { /* first success on this connpool: it is established */
+            w->conn_up[rc->conn_idx] = 1;
+            ++w->established;
+        }
     } else {
         ++w->n_fail;
     }
@@ -274,8 +286,9 @@ static void start_one(struct worker *w)
     /* The first request on a connection establishes it; the rest reuse it as streams. h2o's
      * connection pool handles reuse and re-establishment. Round-robin across the worker's pools so
      * requests spread evenly over its connections, each carrying ~concurrency streams. */
+    rc->conn_idx = w->rr;
     h2o_httpclient_connection_pool_t *cp = &w->connpools[w->rr];
-    w->rr = (w->rr + 1) % w->n_conns;
+    w->rr = (w->rr + 1) % w->active_conns;
     h2o_httpclient_connect(NULL, pool, rc, &w->ctx, cp, &w->target, NULL, on_connect);
 }
 
@@ -345,11 +358,12 @@ static int on_body(h2o_httpclient_t *client, const char *errstr, h2o_header_t *t
     return 0;
 }
 
-static void worker_init(struct worker *w)
-{
-    w->loop = h2o_evloop_create();
+static void setup_connections(struct worker *w);
 
-    /* ---- HTTP/3 (quicly + picotls) context, one per thread ---- */
+/* Build the per-thread HTTP/3 (quicly + picotls) context: TLS, QUIC transport params and tuning
+ * knobs, resumption/0-RTT, certificate verification, and the UDP socket(s). */
+static void setup_h3_context(struct worker *w)
+{
     w->h3ctx = (h2o_http3client_ctx_t){
         .tls =
             {
@@ -425,8 +439,14 @@ static void worker_init(struct worker *w)
     h2o_quic_init_context(&w->h3ctx.h3, w->loop, socks[0], sp > socks + 1 ? socks[1] : NULL, &w->h3ctx.quic, &w->next_cid, NULL,
                           h2o_httpclient_http3_notify_connection_update, 1 /* use_gso */, NULL);
     w->h3ctx.h3.batch_sends = 1; /* coalesce all connections' sends into one sendmmsg per loop pass */
+}
 
-    /* ---- generic client context ---- */
+static void worker_init(struct worker *w)
+{
+    w->loop = h2o_evloop_create();
+    setup_h3_context(w);
+
+    /* generic client context: timeouts, buffer size, protocol ratios, and the DNS receiver */
     w->ctx = (h2o_httpclient_ctx_t){
         .loop = w->loop,
         .getaddr_receiver = &w->getaddr_receiver,
@@ -435,16 +455,20 @@ static void worker_init(struct worker *w)
         .first_byte_timeout = conf.io_timeout,
         .keepalive_timeout = conf.io_timeout,
         .max_buffer_size = 128 * 1024,
-        .http2 = {.max_concurrent_streams = 100},
         .http3 = &w->h3ctx,
     };
-    w->ctx.protocol_selector.ratio.http2 = conf.http2_ratio;
-    w->ctx.protocol_selector.ratio.http3 = conf.http3_ratio;
+    w->ctx.protocol_selector.ratio.http3 = 100; /* H3 only */
 
     w->queue = h2o_multithread_create_queue(w->loop);
     h2o_multithread_register_receiver(w->queue, &w->getaddr_receiver, h2o_hostinfo_getaddr_receiver);
 
-    /* ---- connection pool ---- */
+    setup_connections(w);
+}
+
+/* Parse the target URL and set up this worker's connection pools. One socketpool is shared by all
+ * the worker's connpools; each connpool becomes one QUIC connection over the shared UDP socket. */
+static void setup_connections(struct worker *w)
+{
     if (h2o_url_parse(NULL, conf.url, SIZE_MAX, &w->target) != 0) {
         fprintf(stderr, "unrecognized URL: %s\n", conf.url);
         exit(EXIT_FAILURE);
@@ -457,29 +481,25 @@ static void worker_init(struct worker *w)
         }
         sp_target = &w->connect_to;
     }
-    if (conf.http3_ratio < 100) {
-        /* TLS for the TCP-based HTTP/1|2 fraction (HTTP/3 uses picotls above) */
-        w->ssl_ctx = SSL_CTX_new(SSLv23_client_method());
-        SSL_CTX_load_verify_locations(w->ssl_ctx, ca_bundle(), NULL);
-        SSL_CTX_set_verify(w->ssl_ctx, conf.verify_none ? SSL_VERIFY_NONE : SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-                           NULL);
-    }
     /* One connection pool per connection this worker drives. They share the worker's single QUIC
      * socket and event loop, so N pools become N QUIC connections multiplexed over one UDP socket -
      * which is how we model many client connections without one thread (and one socket) per connection. */
     if (w->n_conns < 1)
         w->n_conns = 1;
     w->connpools = h2o_mem_alloc(sizeof(*w->connpools) * w->n_conns);
-    w->sockpools = h2o_mem_alloc(sizeof(*w->sockpools) * w->n_conns);
-    for (unsigned i = 0; i < w->n_conns; ++i) {
-        h2o_socketpool_target_t *target = h2o_socketpool_create_target(sp_target, NULL);
-        h2o_socketpool_init_specific(&w->sockpools[i], 4, &target, 1, NULL);
-        h2o_socketpool_set_timeout(&w->sockpools[i], conf.io_timeout);
-        h2o_socketpool_register_loop(&w->sockpools[i], w->loop);
-        h2o_httpclient_connection_pool_init(&w->connpools[i], &w->sockpools[i]);
-        if (w->ssl_ctx != NULL)
-            h2o_socketpool_set_ssl_ctx(&w->sockpools[i], w->ssl_ctx);
-    }
+    w->conn_up = h2o_mem_alloc(w->n_conns);
+    memset(w->conn_up, 0, w->n_conns);
+    /* One socketpool shared by all this worker's connection pools. For HTTP/3 the socketpool
+     * holds no runtime resource (the UDP socket lives in the quic ctx); it is only read for the
+     * target and address family. So one per worker suffices and avoids N event-loop timer
+     * registrations that scaled the per-connection cost. Each connpool still keeps its own conn
+     * list, so N connpools still fan out to N distinct QUIC connections. */
+    h2o_socketpool_target_t *target = h2o_socketpool_create_target(sp_target, NULL);
+    h2o_socketpool_init_specific(&w->sockpool, 4, &target, 1, NULL);
+    h2o_socketpool_set_timeout(&w->sockpool, conf.io_timeout);
+    h2o_socketpool_register_loop(&w->sockpool, w->loop);
+    for (unsigned i = 0; i < w->n_conns; ++i)
+        h2o_httpclient_connection_pool_init(&w->connpools[i], &w->sockpool);
 }
 
 static void *worker_main(void *arg)
@@ -487,13 +507,16 @@ static void *worker_main(void *arg)
     struct worker *w = arg;
     worker_init(w);
 
-    /* keep concurrency streams in flight on each of the worker's connections */
-    unsigned target = w->n_conns * conf.concurrency;
+    /* Start with a bounded active set and ramp up (see CONN_RAMP_* above): opening all n_conns
+     * handshakes at once is the dominant failure source at high connection counts. target (streams
+     * in flight) tracks the active set, so offered load ramps together with the connections. */
+    w->active_conns = w->n_conns < CONN_RAMP_INITIAL ? w->n_conns : CONN_RAMP_INITIAL;
 
     for (;;) {
-        /* top up in-flight requests across the worker's connections. With send_batch>1 we wait until
-         * at least that many slots are free before refilling, so the started requests queue together
-         * and quicly coalesces them into one datagram instead of one-per-flush. */
+        unsigned target = w->active_conns * conf.concurrency;
+        /* top up in-flight requests across the worker's active connections. With send_batch>1 we
+         * wait until at least that many slots are free before refilling, so the started requests
+         * queue together and quicly coalesces them into one datagram instead of one-per-flush. */
         if (target - w->inflight >= conf.send_batch || w->inflight == 0)
             while (w->inflight < target && may_start(w))
                 start_one(w);
@@ -511,11 +534,20 @@ static void *worker_main(void *arg)
         }
         h2o_evloop_run(w->loop, INT32_MAX);
         h2o_quic_flush_datagrams(&w->h3ctx.h3); /* flush this pass's batched sends */
+        /* grow the active set, but only while in-flight handshakes stay under the cap */
+        if (w->active_conns < w->n_conns) {
+            unsigned inflight_hs = w->active_conns - w->established;
+            if (inflight_hs < CONN_MAX_HANDSHAKES) {
+                unsigned room = CONN_MAX_HANDSHAKES - inflight_hs;
+                w->active_conns += room < CONN_RAMP_STEP ? room : CONN_RAMP_STEP;
+                if (w->active_conns > w->n_conns)
+                    w->active_conns = w->n_conns;
+            }
+        }
     }
 
     /* flush QUIC CONNECTION_CLOSE so servers do not log the runs as aborts */
-    if (conf.http3_ratio > 0)
-        close_and_drain(w);
+    close_and_drain(w);
     return NULL;
 }
 
@@ -572,8 +604,6 @@ static void usage(void)
             "  -c <num>     concurrent streams per connection (default: 10)\n"
             "  --connections <n> total connections across all threads (default: one per thread)\n"
             "  -t <num>     worker threads (default: all CPUs available to the process)\n"
-            "  -3 <ratio>   HTTP/3 ratio 0-100 (default: 100)\n"
-            "  -2 <ratio>   HTTP/2 ratio 0-100 (remainder uses HTTP/1)\n"
             "  -m <method>  request method (default: GET)\n"
             "  -H <name:value>   add a request header (repeatable)\n"
             "  -x <url>     connect to this host:port instead of the URL's (pins a backend)\n"
@@ -615,6 +645,8 @@ static void add_header(const char *arg)
     ++conf.num_headers;
 }
 
+static unsigned print_summary(struct worker *workers, double elapsed);
+
 int main(int argc, char **argv)
 {
     progname = argv[0];
@@ -649,7 +681,7 @@ int main(int argc, char **argv)
                                         {"help", no_argument, NULL, 'h'},
                                         {NULL}};
     int opt;
-    while ((opt = getopt_long(argc, argv, "n:c:t:d:3:2:m:H:x:W:kh", longopts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "n:c:t:d:m:H:x:W:kh", longopts, NULL)) != -1) {
         switch (opt) {
         case 'n':
             conf.total_requests = (unsigned)strtoul(optarg, NULL, 10);
@@ -662,12 +694,6 @@ int main(int argc, char **argv)
             break;
         case 't':
             conf.threads = (unsigned)strtoul(optarg, NULL, 10);
-            break;
-        case '3':
-            conf.http3_ratio = (int8_t)atoi(optarg);
-            break;
-        case '2':
-            conf.http2_ratio = (int8_t)atoi(optarg);
             break;
         case 'm':
             conf.method = optarg;
@@ -763,11 +789,6 @@ int main(int argc, char **argv)
         fprintf(stderr, "--reconnect needs one connection per thread; use --connections %u or fewer\n", conf.threads);
         return EXIT_FAILURE;
     }
-    if ((int)conf.http2_ratio + (int)conf.http3_ratio > 100) {
-        fprintf(stderr, "HTTP/2 + HTTP/3 ratio exceeds 100\n");
-        return EXIT_FAILURE;
-    }
-
     if (conf.key_exchange != NULL) {
         ptls_key_exchange_algorithm_t **named;
         for (named = ptls_openssl_key_exchanges_all; *named != NULL; ++named)
@@ -792,14 +813,13 @@ int main(int argc, char **argv)
     unsigned base = conf.total_requests / conf.threads, rem = conf.total_requests % conf.threads;
     unsigned conns_base = conf.connections / conf.threads, conns_rem = conf.connections % conf.threads;
 
+    char budget[32];
     if (conf.duration != 0)
-        fprintf(stderr, "h3x -> %s  (h3=%d h2=%d, %u threads, %u conns x %u streams, %gs%s)\n", conf.url, conf.http3_ratio,
-                conf.http2_ratio, conf.threads, conf.connections, conf.concurrency, conf.duration,
-                conf.reconnect != 0 ? ", reconnect mode" : "");
+        snprintf(budget, sizeof budget, "%gs", conf.duration);
     else
-        fprintf(stderr, "h3x -> %s  (h3=%d h2=%d, %u threads, %u conns x %u streams, %u requests%s)\n", conf.url,
-                conf.http3_ratio, conf.http2_ratio, conf.threads, conf.connections, conf.concurrency, conf.total_requests,
-                conf.reconnect != 0 ? ", reconnect mode" : "");
+        snprintf(budget, sizeof budget, "%u requests", conf.total_requests);
+    fprintf(stderr, "h3x -> %s  (%u threads, %u conns x %u streams, %s%s)\n", conf.url, conf.threads,
+            conf.connections, conf.concurrency, budget, conf.reconnect != 0 ? ", reconnect mode" : "");
 
     struct timeval t0, t1;
     gettimeofday(&t0, NULL);
@@ -821,8 +841,15 @@ int main(int argc, char **argv)
         pthread_join(workers[i].tid, NULL);
     gettimeofday(&t1, NULL);
 
-    /* ---- aggregate ---- */
     double elapsed = (t1.tv_sec - t0.tv_sec) + (t1.tv_usec - t0.tv_usec) / 1e6;
+    unsigned n_fail = print_summary(workers, elapsed);
+    free(workers);
+    return n_fail != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+}
+
+/* Merge the per-worker counters and latency samples, print the run summary, and return total failed. */
+static unsigned print_summary(struct worker *workers, double elapsed)
+{
     unsigned n_ok = 0, n_fail = 0, n_resumed = 0, conns = 0;
     uint64_t bytes = 0;
     size_t total_lat = 0;
@@ -863,6 +890,5 @@ int main(int argc, char **argv)
             pctl_ms(lat, total_lat, 100));
 
     free(lat);
-    free(workers);
-    return n_fail != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+    return n_fail;
 }

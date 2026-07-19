@@ -44,13 +44,6 @@ so `--connections` can far exceed `-t` (for example `-t 8 --connections 1024` pu
 on each thread). Total requests in flight are `connections * -c`. Leaving `-t` unset uses every CPU
 the process is allowed (honoring `--cpuset-cpus` and `--cpus`), which is the intent under Docker.
 
-### Protocol
-
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `-3 <ratio>` | 100 | HTTP/3 ratio, 0–100 |
-| `-2 <ratio>` | 0 | HTTP/2 ratio, 0–100 (remainder falls back to HTTP/1) |
-
 ### Request
 
 | Flag | Meaning |
@@ -104,10 +97,4 @@ without resumption:
 ```sh
 ./build/h3x -n 100 --reconnect 1 https://example.com/                  # resumption on
 ./build/h3x -n 100 --reconnect 1 --no-resumption https://example.com/  # full handshake each time
-```
-
-Mixed protocols against a local server with a self-signed cert:
-
-```sh
-./build/h3x -3 50 -2 50 -k https://localhost:8443/
 ```

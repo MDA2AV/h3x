@@ -1,0 +1,3 @@
+#!/bin/sh
+d="$(dirname "$(readlink -f "$0")")"
+LD_LIBRARY_PATH="$d/h2load-native/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec "$d/h2load-native/h2load.bin" "$@"

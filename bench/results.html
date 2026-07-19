@@ -42,8 +42,8 @@
   <b>CPU split:</b> each server is pinned to 6 performance cores (CPUs 0 to 11, 12 SMT threads, 12 worker
   threads). Both clients get the same other 20 threads (CPUs 12 to 31), verified identical, neither pinned per
   thread. Server and client never share a core. &nbsp;
-  <b>Clients:</b> h3x = quicly (UDP GRO and cross-connection send batching on; send-batch is the request
-  refill knob, swept below), h2load = ngtcp2. &nbsp;
+  <b>Clients:</b> h3x = quicly (UDP GRO, cross-connection send batching, and connection-establishment pacing
+  on; send-batch is the request refill knob, swept below), h2load = ngtcp2. &nbsp;
   <b>Servers:</b>
   <span class="k" style="background:#3b82f6"></span>h2o = quicly ·
   <span class="k" style="background:#10b981"></span>nginx = OpenSSL-QUIC ·
@@ -92,8 +92,8 @@
 
   <tr class="top best"><td class="srv" rowspan="4">h2o</td><td>h3x</td><td class="c">512</td><td class="c">8</td><td class="n">1,103,968</td><td class="f">0</td><td><div class="bar h2o"><i style="width:48%"></i></div></td></tr>
   <tr><td>h2load</td><td class="c">512</td><td class="c">8</td><td class="n">1,042,426</td><td class="f">0</td><td><div class="bar h2o"><i style="width:45%"></i></div></td></tr>
-  <tr><td>h3x</td><td class="c">1024</td><td class="c">8</td><td class="n">831,044</td><td class="f bad">3,686</td><td><div class="bar h2o"><i style="width:36%"></i></div></td></tr>
-  <tr><td>h2load</td><td class="c">1024</td><td class="c">8</td><td class="n">341,362</td><td class="f">0</td><td><div class="bar h2o"><i style="width:15%"></i></div></td></tr>
+  <tr><td>h3x</td><td class="c">1024</td><td class="c">8</td><td class="n">884,420</td><td class="f bad">2,013</td><td><div class="bar h2o"><i style="width:38%"></i></div></td></tr>
+  <tr><td>h2load</td><td class="c">1024</td><td class="c">8</td><td class="n">326,674</td><td class="f">0</td><td><div class="bar h2o"><i style="width:14%"></i></div></td></tr>
 
   <tr class="top"><td class="srv" rowspan="4">nginx</td><td>h3x</td><td class="c">512</td><td class="c">8</td><td class="n">650,587</td><td class="f bad">419</td><td><div class="bar nginx"><i style="width:28%"></i></div></td></tr>
   <tr class="best"><td>h2load</td><td class="c">512</td><td class="c">8</td><td class="n">1,185,753</td><td class="f">0</td><td><div class="bar nginx"><i style="width:52%"></i></div></td></tr>
@@ -136,10 +136,14 @@
   <tr><td class="c">1024</td><td class="c">8</td><td class="n">797,880</td><td class="f bad">2,722</td><td><div class="bar h2o"><i style="width:35%"></i></div></td></tr>
 </table>
 <p class="muted">h2load's curve is flatter because its per-connection loop is leaner (ngtcp2, no httpclient
-  connection-pool layer) and it holds a fixed connection set it never refills, so it does not churn. Making
-  h3x competitive here means pacing connection setup and trimming the per-connection cost, not touching the
-  send path: send-batch, a transmit knob, gives back a few percent at low connection counts and nothing at
-  high ones.</p>
+  connection-pool layer) and it holds a fixed connection set it never refills, so it does not churn. This
+  iteration added connection-establishment pacing to h3x (each worker caps its concurrent handshakes and ramps
+  the active set as connections come up); it roughly halved the h2o 1024-connection failure tail (about 3,700
+  to 2,000) with no throughput cost, but it does not change the decline. The decline is the fixed
+  per-connection cost. And on the servers where h2load leads on throughput, the gap is the receive side: GRO
+  only coalesces responses from servers that GSO-batch (h2o, haproxy), so against nginx quicly does more
+  per-packet work than ngtcp2, and no transport knob tried (recv window, UDP payload size, ACK frequency)
+  moved it. Closing that gap would mean not using quicly, the opposite of the reuse-h2o goal.</p>
 
 <h2>The receive side: UDP GRO</h2>
 <p class="muted">GRO is a build-time change in the h2o library h3x links, not a runtime flag, so it is on for
