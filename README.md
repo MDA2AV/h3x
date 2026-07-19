@@ -1,23 +1,18 @@
 # h3x
-Experimental HTTP/3 load generator using libh2o
-
-As usual, unbuckled seatbelt. Use at your own risk.
+Experimental HTTP/3 load generator using libh2o. As usual, unbuckled seatbelt — use at your own risk.
 
 ## Build
 
 ```sh
-git submodule update --init        # pulls in deps/h2o (quicly + picotls come with it)
-cmake -S . -B build
-cmake --build build --target h3x
+git submodule update --init        # deps/h2o (brings quicly + picotls)
+cmake -S . -B build && cmake --build build --target h3x
 ./build/h3x -h
 ```
 
-Needs a C toolchain, CMake, and OpenSSL headers. HTTP/3 runs on h2o's evloop
-backend, which is what the build links (`libh2o-evloop`).
-
-The `deps/h2o` submodule carries a local patch (UDP GRO on the receive path, +14–19%
-against batching servers). It is not upstream, so a `git submodule update` wipes it —
-see [`patches/README.md`](patches/README.md) to reapply or revert.
+Needs a C toolchain, CMake, and OpenSSL headers; links h2o's evloop backend (`libh2o-evloop`).
+`deps/h2o` carries a local patch (UDP GRO on the receive path, +14–19% against batching servers).
+It is not upstream, so a `git submodule update` wipes it — see
+[`patches/README.md`](patches/README.md) to reapply or revert.
 
 ## Usage
 
@@ -25,76 +20,45 @@ see [`patches/README.md`](patches/README.md) to reapply or revert.
 h3x [options] <url>
 ```
 
-The run summary — requests, resumed connections, throughput, and latency
-percentiles — is printed at the end.
+Each worker thread drives its share of `--connections` over a single UDP socket and event loop, so
+connections can far exceed threads (`-t 8 --connections 1024` puts 128 on each thread). Requests in
+flight = `connections × -c`. Leaving `-t` unset uses every CPU the process is allowed (honoring
+cpusets and quotas — the intent under Docker). The end-of-run summary prints requests, resumed
+connections, throughput, and latency percentiles.
 
-### Load shape
-
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `-n <count>` | 100 | total requests across all threads |
-| `-d <seconds>` | off | run for this long instead of `-n` (overrides `-n`) |
-| `-t <num>` | all CPUs | worker threads; auto-detected from the container's CPU set and quota |
-| `--connections <n>` | one per thread | total connections, spread across the worker threads |
-| `-c <num>` | 10 | concurrent streams per connection |
-| `--send-batch <n>` | 1 (off) | hold this many freed slots before refilling, so requests pack into fewer datagrams |
-
-Each worker thread drives one or more QUIC connections over a single UDP socket and event loop,
-so `--connections` can far exceed `-t` (for example `-t 8 --connections 1024` puts 128 connections
-on each thread). Total requests in flight are `connections * -c`. Leaving `-t` unset uses every CPU
-the process is allowed (honoring `--cpuset-cpus` and `--cpus`), which is the intent under Docker.
-
-### Request
-
-| Flag | Meaning |
-|------|---------|
-| `-m <method>` | request method (default `GET`) |
+| Flag | Meaning (default) |
+|------|-------------------|
+| `-n <count>` | total requests across all threads (100) |
+| `-d <seconds>` | run for a duration instead; overrides `-n` |
+| `-t <num>` | worker threads (all allowed CPUs) |
+| `--connections <n>` | total connections, spread across threads (one per thread) |
+| `-c <num>` | concurrent streams per connection (10) |
+| `--send-batch <n>` | hold N freed slots before refilling, so requests pack into fewer datagrams (1 = off) |
+| `-m <method>` | request method (`GET`) |
 | `-H <name:value>` | add a request header (repeatable) |
 | `-x <url>` | connect to this host:port instead of the URL's (pin a backend / skip DNS) |
-
-### TLS
-
-| Flag | Meaning |
-|------|---------|
 | `-k` | skip certificate verification |
 | `--key-exchange <name>` | override the TLS key exchange (e.g. `x25519`) |
-
-Verification uses the system CA bundle (`/etc/ssl/certs/ca-certificates.crt`);
-override it with the `H3X_CA_BUNDLE` environment variable.
-
-### Connection reuse / 0-RTT
-
-| Flag | Meaning |
-|------|---------|
-| `--reconnect <N>` | close each connection after N requests, so connections churn and 0-RTT resumption gets exercised |
-| `--no-resumption` | force a full handshake on every connection (disables the ticket cache) |
-
-Resumption is on by default; the summary reports how many connections resumed.
-
-### QUIC transport tuning
-
-| Flag | Meaning |
-|------|---------|
+| `--reconnect <N>` | close each connection after N requests, so churn exercises 0-RTT resumption |
+| `--no-resumption` | full handshake on every connection (disables the ticket cache) |
 | `-W <bytes>` | HTTP/3 receive window, per stream |
 | `--max-udp-payload-size <bytes>` | `max_udp_payload_size` transport parameter |
 | `--initial-udp-payload-size <bytes>` | initial egress UDP payload size |
 | `--ack-frequency <0..1>` | ACK frequency ratio |
 | `--disallow-delayed-ack` | disable delayed ACKs |
 | `--no-ecn` | disable ECN |
-| `--qpack-table <bytes>` | QPACK encoder dynamic table capacity (default 4096) |
+| `--qpack-table <bytes>` | QPACK encoder dynamic table capacity (4096) |
+
+Resumption is on by default. Certificate verification uses the system CA bundle
+(`/etc/ssl/certs/ca-certificates.crt`); override with `H3X_CA_BUNDLE`.
 
 ## Examples
 
-Basic load — 1000 requests, 50 concurrent per thread, 4 threads:
-
 ```sh
-./build/h3x -n 1000 -c 50 -t 4 https://example.com/
+./build/h3x -n 1000 -c 50 -t 4 https://example.com/                    # basic load
+./build/h3x -n 100 --reconnect 1 https://example.com/                  # resumption / 0-RTT on
+./build/h3x -n 100 --reconnect 1 --no-resumption https://example.com/  # vs full handshake each time
 ```
 
-Measure the resumption / 0-RTT benefit — reconnect on every request, with and
-without resumption:
-
-```sh
-./build/h3x -n 100 --reconnect 1 https://example.com/                  # resumption on
-./build/h3x -n 100 --reconnect 1 --no-resumption https://example.com/  # full handshake each time
-```
+Benchmarks against h2load across five QUIC servers live in `bench/` (`run.sh`; results in
+`results.html`, send-batch A/B in `sb-sweep.sh`).
