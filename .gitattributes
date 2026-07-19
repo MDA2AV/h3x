@@ -1,0 +1,5 @@
+# GitHub language stats (Linguist): count only src/. h3x is a C project; everything else -
+# the benchmark harness (bench/), examples, docs, patches, build files, and the vendored h2o
+# submodule - is marked vendored so the repo's language bar reflects h3x's own code.
+* linguist-vendored
+src/** -linguist-vendored
