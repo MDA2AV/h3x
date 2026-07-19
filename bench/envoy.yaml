@@ -1,0 +1,44 @@
+# Envoy HTTP/3 server for benchmarking - serves the same 20KB file over HTTP/3 (QUIC) on :14437 using
+# Envoy's Google-quiche stack (a fifth QUIC stack). Envoy is a proxy, not a file server, so the 20KB
+# file is returned via a direct_response reading it from disk. Match the others' 4 workers with
+# `--concurrency 4` on the command line. No access logging.
+static_resources:
+  listeners:
+  - name: h3
+    address:
+      socket_address: { address: 0.0.0.0, port_value: 14437, protocol: UDP }
+    udp_listener_config:
+      quic_options: {}
+      downstream_socket_config: { max_rx_datagram_size: 1500 }
+    filter_chains:
+    - transport_socket:
+        name: envoy.transport_sockets.quic
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.quic.v3.QuicDownstreamTransport
+          downstream_tls_context:
+            common_tls_context:
+              tls_certificates:
+              - certificate_chain: { filename: /certs/tls.crt }
+                private_key: { filename: /certs/tls.key }
+      filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: h3
+          codec_type: HTTP3
+          http3_protocol_options: {}
+          route_config:
+            name: local
+            max_direct_response_body_size_bytes: 32768  # default 4096; the served file is 20KB
+            virtual_hosts:
+            - name: all
+              domains: ["*"]
+              routes:
+              - match: { prefix: "/" }
+                direct_response:
+                  status: 200
+                  body: { filename: /doc_root/index.html }
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

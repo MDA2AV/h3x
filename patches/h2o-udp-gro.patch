@@ -1,0 +1,225 @@
+diff --git a/lib/http3/common.c b/lib/http3/common.c
+index fa21b91..fdafe55 100644
+--- a/lib/http3/common.c
++++ b/lib/http3/common.c
+@@ -775,13 +775,26 @@ static void process_packets(h2o_quic_ctx_t *ctx, quicly_address_t *destaddr, qui
+         ctx->notify_conn_update(ctx, conn);
+ }
+ 
++/* UDP GRO coalesces many inbound datagrams into a single recv. When enabled, receive buffers must be
++ * large enough to hold a coalesced (up to 64KB) datagram, so we trade slot count for buffer size. */
++#ifdef UDP_GRO
++#define QUIC_READ_DGRAMS 4
++#define QUIC_READ_BUFSIZE 65536
++#else
++#define QUIC_READ_DGRAMS 10
++#define QUIC_READ_BUFSIZE 1600
++#endif
++#define QUIC_READ_MAX_SEGS (QUIC_READ_DGRAMS * (QUIC_READ_BUFSIZE / 1200 + 1))
++
+ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+ {
+-    struct {
++    /* large when GRO is on, so keep it in thread-local storage rather than on the stack */
++    static __thread struct {
+         quicly_address_t destaddr, srcaddr;
+         struct iovec vec;
+         uint8_t ttl;
+         uint8_t ecn;
++        size_t gso_size; /* UDP GRO segment size, 0 if the datagram was not coalesced */
+         union {
+             struct cmsghdr _align; /* natrually align the contents of controlbuf (which are of type cmsghdr) */
+             char controlbuf[
+@@ -796,11 +809,14 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+ #endif
+ #if defined(IPV6_TCLASS) || defined(IP_TOS) || defined(IP_RECVTOS)
+                 + CMSG_SPACE(sizeof(int)) /* IPv6 uses int, which is bigger than uint8_t used by IPv4 */
++#endif
++#ifdef UDP_GRO
++                + CMSG_SPACE(sizeof(int)) /* UDP_GRO segment size */
+ #endif
+             ];
+         };
+-        uint8_t buf[1600];
+-    } dgrams[10];
++        uint8_t buf[QUIC_READ_BUFSIZE];
++    } dgrams[QUIC_READ_DGRAMS];
+ #ifdef __linux__
+     struct mmsghdr mess[PTLS_ELEMENTSOF(dgrams)];
+ #else
+@@ -866,6 +882,7 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+     /* normalize and store the obtained data into `dgrams` */
+     for (dgram_index = 0; dgram_index < num_dgrams; ++dgram_index) {
+         dgrams[dgram_index].ecn = 0;
++        dgrams[dgram_index].gso_size = 0;
+         dgrams[dgram_index].destaddr.sa.sa_family = AF_UNSPEC;
+         { /* fetch destination address */
+             struct cmsghdr *cmsg;
+@@ -924,6 +941,15 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+                         break;
+                     }
+                     break;
++#ifdef UDP_GRO
++                case IPPROTO_UDP:
++                    if (cmsg->cmsg_type == UDP_GRO) {
++                        int seg;
++                        memcpy(&seg, CMSG_DATA(cmsg), sizeof(seg));
++                        dgrams[dgram_index].gso_size = (size_t)seg;
++                    }
++                    break;
++#endif
+                 }
+             }
+         }
+@@ -938,65 +964,87 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+         }
+     }
+ 
+-    /* convert dgrams to decoded packets and process them in group of (4-tuple, dcid) */
++    /* Explode any GRO-coalesced datagrams into individual segments. Each segment must be decoded within its
++     * own datagram boundary: a QUIC short-header packet carries no length and runs to the end of its datagram,
++     * so feeding the whole coalesced buffer to quicly_decode_packet would misparse across segment boundaries. */
++    struct {
++        quicly_address_t destaddr, srcaddr;
++        uint8_t ttl, ecn;
++        uint8_t *base;
++        size_t len;
++    } segs[QUIC_READ_MAX_SEGS];
++    size_t num_segs = 0;
++    for (dgram_index = 0; dgram_index < num_dgrams; ++dgram_index) {
++        if (dgrams[dgram_index].vec.iov_len == 0)
++            continue; /* preprocessing failed / unused */
++        size_t total = dgrams[dgram_index].vec.iov_len, seg = dgrams[dgram_index].gso_size;
++        if (seg == 0)
++            seg = total; /* not coalesced: the whole buffer is one datagram */
++        for (size_t off = 0; off < total && num_segs < PTLS_ELEMENTSOF(segs); off += seg) {
++            size_t slen = total - off < seg ? total - off : seg;
++            segs[num_segs].destaddr = dgrams[dgram_index].destaddr;
++            segs[num_segs].srcaddr = dgrams[dgram_index].srcaddr;
++            segs[num_segs].ttl = dgrams[dgram_index].ttl;
++            segs[num_segs].ecn = dgrams[dgram_index].ecn;
++            segs[num_segs].base = (uint8_t *)dgrams[dgram_index].vec.iov_base + off;
++            segs[num_segs].len = slen;
++            ++num_segs;
++        }
++    }
++
++    /* convert segments to decoded packets and process them in group of (4-tuple, dcid) */
+     quicly_decoded_packet_t packets[64];
+     size_t packet_index = 0;
+-    dgram_index = 0;
+-    while (dgram_index < num_dgrams) {
++    size_t seg_index = 0;
++    while (seg_index < num_segs) {
+         int has_decoded = 0; /* indicates if a decoded packet belonging to a different connection is stored at
+                               * `packets[packet_index]` */
+-        /* skip zero-sized datagrams (or the ones for which preprocessing failed) */
+-        if (dgrams[dgram_index].vec.iov_len == 0) {
+-            ++dgram_index;
+-            continue;
+-        }
+-        /* dispatch packets in `packets`, if the datagram at dgram_index is from a different path */
++        /* dispatch packets in `packets`, if the segment at seg_index is from a different path */
+         if (packet_index != 0) {
+-            assert(dgram_index != 0);
++            assert(seg_index != 0);
+             /* check source address */
+-            if (h2o_socket_compare_address(&dgrams[dgram_index - 1].srcaddr.sa, &dgrams[dgram_index].srcaddr.sa, 1) != 0)
++            if (h2o_socket_compare_address(&segs[seg_index - 1].srcaddr.sa, &segs[seg_index].srcaddr.sa, 1) != 0)
+                 goto ProcessPackets;
+             /* check destination address, if available */
+-            if (dgrams[dgram_index - 1].destaddr.sa.sa_family == AF_UNSPEC &&
+-                dgrams[dgram_index].destaddr.sa.sa_family == AF_UNSPEC) {
++            if (segs[seg_index - 1].destaddr.sa.sa_family == AF_UNSPEC && segs[seg_index].destaddr.sa.sa_family == AF_UNSPEC) {
+                 /* ok */
+-            } else if (h2o_socket_compare_address(&dgrams[dgram_index - 1].destaddr.sa, &dgrams[dgram_index].destaddr.sa, 1) == 0) {
++            } else if (h2o_socket_compare_address(&segs[seg_index - 1].destaddr.sa, &segs[seg_index].destaddr.sa, 1) == 0) {
+                 /* ok */
+             } else {
+                 goto ProcessPackets;
+             }
+             /* TTL should be same for dispatched packets */
+-            if (dgrams[dgram_index - 1].ttl != dgrams[dgram_index].ttl)
++            if (segs[seg_index - 1].ttl != segs[seg_index].ttl)
+                 goto ProcessPackets;
+         }
+         /* decode the first packet */
+         size_t payload_off = 0;
+-        if (quicly_decode_packet(ctx->quic, packets + packet_index, dgrams[dgram_index].vec.iov_base,
+-                                 dgrams[dgram_index].vec.iov_len, &payload_off) == SIZE_MAX) {
+-            ++dgram_index;
++        if (quicly_decode_packet(ctx->quic, packets + packet_index, segs[seg_index].base, segs[seg_index].len, &payload_off) ==
++            SIZE_MAX) {
++            ++seg_index;
+             goto ProcessPackets;
+         }
+-        packets[packet_index].ecn = dgrams[dgram_index].ecn;
++        packets[packet_index].ecn = segs[seg_index].ecn;
+         /* dispatch packets in `packets` if the DCID is different, setting the `has_decoded` flag */
+         if (packet_index != 0) {
+             const ptls_iovec_t *prev_dcid = &packets[packet_index - 1].cid.dest.encrypted,
+                                *cur_dcid = &packets[packet_index].cid.dest.encrypted;
+             if (!(prev_dcid->len == cur_dcid->len && memcmp(prev_dcid->base, cur_dcid->base, prev_dcid->len) == 0)) {
+                 has_decoded = 1;
+-                ++dgram_index;
++                ++seg_index;
+                 goto ProcessPackets;
+             }
+         }
+         ++packet_index;
+         /* add rest of the packets */
+-        while (payload_off < dgrams[dgram_index].vec.iov_len && packet_index < PTLS_ELEMENTSOF(packets)) {
+-            if (quicly_decode_packet(ctx->quic, packets + packet_index, dgrams[dgram_index].vec.iov_base,
+-                                     dgrams[dgram_index].vec.iov_len, &payload_off) == SIZE_MAX)
++        while (payload_off < segs[seg_index].len && packet_index < PTLS_ELEMENTSOF(packets)) {
++            if (quicly_decode_packet(ctx->quic, packets + packet_index, segs[seg_index].base, segs[seg_index].len, &payload_off) ==
++                SIZE_MAX)
+                 break;
+-            packets[packet_index].ecn = dgrams[dgram_index].ecn;
++            packets[packet_index].ecn = segs[seg_index].ecn;
+             ++packet_index;
+         }
+-        ++dgram_index;
++        ++seg_index;
+         /* if we have enough room for the next datagram, that is, the expected worst case of 4 packets in a coalesced datagram,
+          * continue */
+         if (packet_index + 4 < PTLS_ELEMENTSOF(packets))
+@@ -1004,8 +1052,8 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+ 
+     ProcessPackets:
+         if (packet_index != 0) {
+-            process_packets(ctx, &dgrams[dgram_index - 1].destaddr, &dgrams[dgram_index - 1].srcaddr, dgrams[dgram_index - 1].ttl,
+-                            packets, packet_index);
++            process_packets(ctx, &segs[seg_index - 1].destaddr, &segs[seg_index - 1].srcaddr, segs[seg_index - 1].ttl, packets,
++                            packet_index);
+             if (has_decoded) {
+                 packets[0] = packets[packet_index];
+                 packet_index = 1;
+@@ -1015,9 +1063,12 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+         }
+     }
+     if (packet_index != 0)
+-        process_packets(ctx, &dgrams[dgram_index - 1].destaddr, &dgrams[dgram_index - 1].srcaddr, dgrams[dgram_index - 1].ttl,
+-                        packets, packet_index);
++        process_packets(ctx, &segs[seg_index - 1].destaddr, &segs[seg_index - 1].srcaddr, segs[seg_index - 1].ttl, packets,
++                        packet_index);
+ 
++#undef QUIC_READ_DGRAMS
++#undef QUIC_READ_BUFSIZE
++#undef QUIC_READ_MAX_SEGS
+ Exit:;
+ 
+ #undef INIT_DGRAMS
+@@ -1045,6 +1096,12 @@ static void setup_quic_socket(h2o_quic_ctx_t *ctx, h2o_quic_socket_t *qsock, h2o
+         break;
+     }
+     qsock->sock->data = ctx;
++#ifdef UDP_GRO
++    { /* let the kernel coalesce inbound datagrams into a single recv (fewer syscalls, less per-packet work) */
++        int on = 1;
++        setsockopt(h2o_socket_get_fd(qsock->sock), SOL_UDP, UDP_GRO, &on, sizeof(on));
++    }
++#endif
+     h2o_socket_read_start(qsock->sock, on_read);
+ }
+ 
