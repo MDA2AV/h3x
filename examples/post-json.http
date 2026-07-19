@@ -1,0 +1,10 @@
+# Single POST with a JSON body. Everything after the blank line up to EOF (or the
+# next ###) is the body, sent as-is; content-length is set automatically.
+# Note: the bench servers only serve static files (a POST there returns 405/405-like);
+# point this at a real application target.
+
+POST /api/login
+content-type: application/json
+x-request-source: h3x
+
+{"user":"bench","password":"hunter2","remember":true}
