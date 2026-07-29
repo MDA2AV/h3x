@@ -205,8 +205,12 @@ void *worker_main(void *arg)
         unsigned target = w->active_conns * conf.concurrency;
         /* top up in-flight requests across the worker's active connections. With send_batch>1 we
          * wait until at least that many slots are free before refilling, so the started requests
-         * queue together and quicly coalesces them into one datagram instead of one-per-flush. */
-        if (target - w->inflight >= conf.send_batch || w->inflight == 0)
+         * queue together and quicly coalesces them into one datagram instead of one-per-flush.
+         * Both sides of this comparison are worker-wide slot counts; bound the threshold by what the
+         * worker can actually hold, so an oversized --send-batch degenerates to "drain, then refill
+         * everything" rather than never matching. */
+        unsigned batch = conf.send_batch < target ? conf.send_batch : target;
+        if (target - w->inflight >= batch || w->inflight == 0)
             while (w->inflight < target && may_start(w))
                 start_one(w);
         if (w->inflight == 0) {
