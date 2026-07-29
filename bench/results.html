@@ -5,63 +5,135 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>h3x vs h2o-httpclient vs h2load</title>
 <style>
-  :root{color-scheme:light dark}
+  :root{
+    color-scheme:light dark;
+    --surface:#fcfcfb; --plane:#f9f9f7;
+    --ink:#0b0b0b; --ink-2:#52514e; --ink-muted:#898781;
+    --rule:#e1e0d9; --edge:rgba(11,11,11,.10);
+    --seq-a:#2a78d6; --seq-b:#eb6834;
+  }
+  @media(prefers-color-scheme:dark){:root:where(:not([data-theme=light])){
+    --surface:#1a1a19; --plane:#0d0d0d;
+    --ink:#fff; --ink-2:#c3c2b7; --ink-muted:#898781;
+    --rule:#2c2c2a; --edge:rgba(255,255,255,.10);
+    --seq-a:#3987e5; --seq-b:#d95926;
+  }}
+  :root[data-theme=dark]{
+    --surface:#1a1a19; --plane:#0d0d0d;
+    --ink:#fff; --ink-2:#c3c2b7; --ink-muted:#898781;
+    --rule:#2c2c2a; --edge:rgba(255,255,255,.10);
+    --seq-a:#3987e5; --seq-b:#d95926;
+  }
   *{box-sizing:border-box}
-  body{font:14.5px/1.55 system-ui,sans-serif;margin:0}
-  header{max-width:1080px;margin:0 auto;padding:1.3rem 1.2rem .3rem}
-  header h3{font-size:1.25rem;margin:.2rem 0}
-  header p{max-width:72ch}
-  p{opacity:.8;font-size:.94em}
-  .layout{display:flex;gap:1.7rem;max-width:1080px;margin:0 auto;padding:.8rem 1.2rem 2.4rem}
-  nav.side{width:185px;flex:none;position:sticky;top:1rem;align-self:flex-start}
-  nav.side .grp{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;opacity:.5;margin:1.2rem 0 .3rem}
-  nav.side label{display:block;padding:.3rem .6rem;margin:.1rem 0;cursor:pointer;border-radius:6px;opacity:.72;font-size:.95rem}
-  nav.side label:hover{background:#8881}
+  body{font:14.5px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;
+       background:var(--plane);color:var(--ink)}
+  header{max-width:1140px;margin:0 auto;padding:1.8rem 1.2rem .2rem}
+  header h3{font-size:1.55rem;margin:0 0 .5rem;letter-spacing:-.02em}
+  header .lede{max-width:82ch;font-size:1.02em;color:var(--ink-2);margin:0 0 1.1rem}
+  main p{max-width:76ch;color:var(--ink-2);font-size:.94em}
+  /* The run configuration is metadata, not prose: as a full-width spec strip it uses the horizontal
+     space the old two-paragraph header wasted, and each fact becomes individually findable. */
+  .spec{display:grid;grid-template-columns:repeat(auto-fit,minmax(172px,1fr));gap:0;margin:0;
+        border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+  .spec>div{padding:.6rem .9rem;border-left:1px solid var(--rule)}
+  .spec>div:first-child{border-left:0;padding-left:0}
+  @media(max-width:1180px){.spec>div{border-left:0;padding-left:0}}
+  .spec dt{font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-muted)}
+  .spec dd{margin:.15rem 0 0;font-size:.92rem;color:var(--ink);line-height:1.35}
+  .spec dd span{display:block;font-size:.78rem;color:var(--ink-muted);margin-top:.1rem}
+  .spec code{font-size:.85em}
+  td.sub2{color:var(--ink-muted)}
+  .layout{display:flex;gap:1.9rem;max-width:1140px;margin:0 auto;padding:.8rem 1.2rem 3rem}
+  nav.side{width:190px;flex:none;position:sticky;top:1rem;align-self:flex-start}
+  nav.side .grp{font-size:.7rem;text-transform:uppercase;letter-spacing:.07em;
+                color:var(--ink-muted);margin:1.3rem 0 .35rem}
+  nav.side label{display:block;padding:.34rem .6rem;margin:.1rem 0;cursor:pointer;
+                 border-radius:7px;color:var(--ink-2);font-size:.95rem;
+                 border:1px solid transparent}
+  nav.side label:hover{background:color-mix(in oklab,var(--seq-a) 8%,transparent)}
   main{flex:1;min-width:0}
-  main h4{font-size:1.08rem;margin:.1rem 0 .7rem}
-  table{border-collapse:collapse;width:100%;margin:.4rem 0;table-layout:fixed}
-  th,td{text-align:right;padding:.24rem .55rem;border-bottom:1px solid #8884;font-variant-numeric:tabular-nums}
-  th{font-weight:600;font-size:.82em;opacity:.85}
-  td{font-size:.97em}
-  .pct{opacity:.5;font-size:.8em;margin-left:.1em}
-  .g{background:#22c55e33} .y{background:#eab30829} .r{background:#ef444433}
-  dl.legend{display:grid;grid-template-columns:max-content 1fr;gap:.4rem 1.1rem;font-size:.95em;margin:.9rem 0}
-  dl.legend dt{font-weight:600;white-space:nowrap}
-  dl.legend dd{margin:0;opacity:.8}
-  main p{max-width:76ch}
-  pre{background:#8881;padding:.8rem 1rem;border-radius:8px;overflow-x:auto;font-size:.88em;line-height:1.5;max-width:76ch}
-  code{background:#8881;padding:.1em .35em;border-radius:4px;font-size:.9em}
+  main h4{font-size:1.1rem;margin:.1rem 0 .9rem;letter-spacing:-.01em}
+  main h5{font-size:.83rem;text-transform:uppercase;letter-spacing:.07em;
+          color:var(--ink-muted);margin:1.8rem 0 .1rem;font-weight:600}
+  main h5 .sub{text-transform:none;letter-spacing:0;font-weight:400;opacity:.75}
+  /* Stat tiles: the answer, above the evidence. Proportional figures on the big number. */
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.7rem;
+         margin:.2rem 0 1.4rem}
+  .tile{background:var(--surface);border:1px solid var(--edge);border-radius:10px;padding:.7rem .85rem}
+  .tile .tl{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted)}
+  .tile .tv{font-size:1.5rem;line-height:1.25;margin:.15rem 0 .1rem;letter-spacing:-.02em}
+  .tile .tv .of{font-size:.9rem;color:var(--ink-muted);letter-spacing:0}
+  .tile .ts{font-size:.79rem;color:var(--ink-2);line-height:1.4}
+  /* Wide tables scroll inside their own box; the page body never scrolls sideways. */
+  .scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--edge);
+          border-radius:10px;margin:.5rem 0 0}
+  table{border-collapse:collapse;width:100%;min-width:560px;table-layout:fixed}
+  th,td{text-align:right;padding:.3rem .6rem;font-variant-numeric:tabular-nums;
+        border-bottom:1px solid var(--rule)}
+  tr:last-child td{border-bottom:0}
+  th{font-weight:600;font-size:.78em;color:var(--ink-muted);white-space:nowrap;
+     position:sticky;top:0;background:var(--surface)}
+  td{font-size:.95em;color:var(--ink)}
+  tbody tr:hover td,table tr:hover td{outline:1px solid color-mix(in oklab,var(--seq-a) 35%,transparent);
+                                      outline-offset:-1px}
+  .pct{color:var(--ink-muted);font-size:.78em;margin-left:.35em}
+  .win{color:var(--seq-a);font-size:.7em;vertical-align:.15em;margin-left:.25em}
+  td.zero{color:var(--ink-muted)}
+  td.unk{color:var(--ink-muted);font-style:italic}
+  /* Sequential encodings get a scale legend, or the tint is just decoration. */
+  .scale{display:flex;align-items:center;gap:.45rem;margin:.5rem 0 0;
+         font-size:.75rem;color:var(--ink-muted);flex-wrap:wrap}
+  .scale .ramp{display:flex;border:1px solid var(--edge);border-radius:4px;overflow:hidden}
+  .scale i{width:20px;height:11px;display:block}
+  .scale em{font-style:normal;opacity:.85}
+  dl.legend{display:grid;grid-template-columns:max-content 1fr;gap:.45rem 1.1rem;
+            font-size:.93em;margin:.9rem 0}
+  dl.legend dt{font-weight:600;white-space:nowrap;color:var(--ink)}
+  dl.legend dd{margin:0;color:var(--ink-2)}
+  pre{background:var(--surface);border:1px solid var(--edge);padding:.85rem 1rem;border-radius:10px;
+      overflow-x:auto;font-size:.86em;line-height:1.55;max-width:80ch}
+  code{background:color-mix(in oklab,var(--ink) 7%,transparent);padding:.1em .35em;
+       border-radius:4px;font-size:.9em}
   pre code{background:none;padding:0}
-  details{margin:1rem 0;border-top:1px solid #8883;padding-top:.6rem}
-  summary{cursor:pointer;font-weight:600;font-size:.92rem;opacity:.85}
+  details{margin:1.1rem 0;border-top:1px solid var(--rule);padding-top:.7rem}
+  details.key{border-top:0;padding-top:0;margin:.2rem 0 .4rem}
+  summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--ink-2)}
+  summary:hover{color:var(--ink)}
   details p{margin:.7rem 0 0}
-  input[name=nav]{display:none}
+  input[name=nav]{position:absolute;opacity:0;pointer-events:none}
+  input[name=nav]:focus-visible~.layout label[for]{outline:2px solid var(--seq-a);outline-offset:2px}
   .panel{display:none}
-#nav-h2o:checked~.layout #pan-h2o{display:block}#nav-h2o:checked~.layout label[for=nav-h2o]{opacity:1;font-weight:600;background:#8882}
-#nav-nginx:checked~.layout #pan-nginx{display:block}#nav-nginx:checked~.layout label[for=nav-nginx]{opacity:1;font-weight:600;background:#8882}
-#nav-haproxy:checked~.layout #pan-haproxy{display:block}#nav-haproxy:checked~.layout label[for=nav-haproxy]{opacity:1;font-weight:600;background:#8882}
-#nav-findings:checked~.layout #pan-findings{display:block}#nav-findings:checked~.layout label[for=nav-findings]{opacity:1;font-weight:600;background:#8882}
-#nav-layout:checked~.layout #pan-layout{display:block}#nav-layout:checked~.layout label[for=nav-layout]{opacity:1;font-weight:600;background:#8882}
-#nav-reproduce:checked~.layout #pan-reproduce{display:block}#nav-reproduce:checked~.layout label[for=nav-reproduce]{opacity:1;font-weight:600;background:#8882}
-  @media(max-width:720px){
+#nav-h2o:checked~.layout #pan-h2o{display:block}#nav-h2o:checked~.layout label[for=nav-h2o]{color:var(--ink);font-weight:600;background:color-mix(in oklab,var(--seq-a) 12%,transparent);border-color:color-mix(in oklab,var(--seq-a) 30%,transparent)}
+#nav-nginx:checked~.layout #pan-nginx{display:block}#nav-nginx:checked~.layout label[for=nav-nginx]{color:var(--ink);font-weight:600;background:color-mix(in oklab,var(--seq-a) 12%,transparent);border-color:color-mix(in oklab,var(--seq-a) 30%,transparent)}
+#nav-haproxy:checked~.layout #pan-haproxy{display:block}#nav-haproxy:checked~.layout label[for=nav-haproxy]{color:var(--ink);font-weight:600;background:color-mix(in oklab,var(--seq-a) 12%,transparent);border-color:color-mix(in oklab,var(--seq-a) 30%,transparent)}
+#nav-findings:checked~.layout #pan-findings{display:block}#nav-findings:checked~.layout label[for=nav-findings]{color:var(--ink);font-weight:600;background:color-mix(in oklab,var(--seq-a) 12%,transparent);border-color:color-mix(in oklab,var(--seq-a) 30%,transparent)}
+#nav-layout:checked~.layout #pan-layout{display:block}#nav-layout:checked~.layout label[for=nav-layout]{color:var(--ink);font-weight:600;background:color-mix(in oklab,var(--seq-a) 12%,transparent);border-color:color-mix(in oklab,var(--seq-a) 30%,transparent)}
+#nav-reproduce:checked~.layout #pan-reproduce{display:block}#nav-reproduce:checked~.layout label[for=nav-reproduce]{color:var(--ink);font-weight:600;background:color-mix(in oklab,var(--seq-a) 12%,transparent);border-color:color-mix(in oklab,var(--seq-a) 30%,transparent)}
+  @media(max-width:760px){
     .layout{flex-direction:column;gap:.4rem;padding:.8rem}
     nav.side{position:static;width:auto;display:flex;flex-wrap:wrap;gap:.2rem;align-items:baseline}
-    nav.side .grp{width:100%;margin:.4rem 0 0}
-    th,td{padding:.22rem .35rem}
-    .pct{display:none}
+    nav.side .grp{width:100%;margin:.5rem 0 0}
+    th,td{padding:.26rem .4rem}
+    .tiles{grid-template-columns:1fr 1fr}
   }
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
 <header>
 <h3>h3x vs h2o-httpclient vs h2load: HTTP/3, 1 KB object</h3>
-<p>req/s per client, best of one 10 s run. <span class="g">&nbsp;green&nbsp;</span> fastest,
-<span class="y">&nbsp;yellow&nbsp;</span> middle, <span class="r">&nbsp;red&nbsp;</span> slowest;
-% is share of the fastest. Loopback, i9-14900K, 32 CPUs, unpinned; all clients native, <code>-t
-32</code>. h3x <code>--send-batch</code> is set per cell to half the worker-wide target
-(<code>conns/threads x m</code>), not a fixed 64: a fixed value means a different thing in every
-cell. Raw data: <code>bench/matrix-v2*.log</code> (h3x, spc) and <code>bench/matrix*.log</code>
-(h2load, h2o-httpclient).</p>
+<p class="lede">Four HTTP/3 clients over a grid of connections x streams-per-connection, against
+three servers. Every cell records throughput, failed requests, and the datagrams the kernel dropped
+on each side, because those three point in different directions and only reading all of them gets
+the story right.</p>
+<dl class="spec">
+<div><dt>grid</dt><dd>4 conns x 6 streams x 4 clients x 3 servers<span>288 cells, one 10 s run each</span></dd></div>
+<div><dt>machine</dt><dd>i9-14900K, 32 CPUs<span>loopback, unpinned, all clients native</span></dd></div>
+<div><dt>object</dt><dd>1 KB static file<span>re-derived per cell from the client's own byte counters</span></dd></div>
+<div><dt>h3x send-batch</dt><dd>half the worker target<span><code>conns/threads x m / 2</code>, not a fixed 64</span></dd></div>
+<div><dt>colour</dt><dd>magnitude, deepest = largest<span>scale under every table; the row winner also carries a marker</span></dd></div>
+<div><dt>raw data</dt><dd><code>bench/matrix-v3-*.log</code><span>one per server, four client tags interleaved</span></dd></div>
+</dl>
 </header>
 <input type="radio" name="nav" id="nav-h2o" checked><input type="radio" name="nav" id="nav-nginx"><input type="radio" name="nav" id="nav-haproxy"><input type="radio" name="nav" id="nav-findings"><input type="radio" name="nav" id="nav-layout"><input type="radio" name="nav" id="nav-reproduce">
 <div class="layout">
@@ -77,6 +149,9 @@ cell. Raw data: <code>bench/matrix-v2*.log</code> (h3x, spc) and <code>bench/mat
 </nav>
 <main>
 <section class="panel" id="pan-h2o">
+<h4>vs h2o (quicly, GRO patch, 12 threads, native)</h4>
+<div class="tiles"><div class="tile"><div class="tl">fastest client</div><div class="tv">h3x</div><div class="ts">3.54M req/s at 64 conns, m=64</div></div><div class="tile"><div class="tl">cells won</div><div class="tv">21<span class='of'>/24</span></div><div class="ts">h3x 21, h3x spc 1, h2o-httpclient 1, h2load 1</div></div><div class="tile"><div class="tl">most failed requests</div><div class="tv">134</div><div class="ts">h2o-httpclient; total across all clients 134</div></div><div class="tile"><div class="tl">most server UDP drops</div><div class="tv">1.16M</div><div class="ts">h3x spc; total across all clients 1.72M</div></div></div>
+<details class="key"><summary>What the four clients are, and what each table measures</summary>
 <dl class="legend">
 <dt>h3x</dt><dd>this project, 32 worker threads, each multiplexing its share of the connections
 over one UDP socket (connections share the thread's 4-tuple, distinguished by QUIC connection ID)</dd>
@@ -90,62 +165,147 @@ completions counted from status lines. At 256-512 connections that is 256-512 pr
 ceiling</dd>
 <dt>h2load</dt><dd>nghttp2's load tool on the ngtcp2 stack, one socket per connection</dd>
 </dl>
-<h4>vs h2o (quicly, GRO patch, 12 threads, native)</h4>
-<table>
-<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:18%"><col span="2" style="width:8%"></colgroup><tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h3x spc req/s</th><th>h2o-httpclient req/s</th><th>h2load req/s</th><th>h3x drops</th><th>spc drops</th></tr>
-<tr><td>64</td><td>1</td><td class="g"><b>955,485</b> <span class="pct">100%</span></td><td class="y">705,498 <span class="pct">74%</span></td><td class="y">640,412 <span class="pct">67%</span></td><td class="r">7,006 <span class="pct">0.7%</span></td><td>0</td><td>0</td></tr>
-<tr><td>64</td><td>2</td><td class="g"><b>1,065,981</b> <span class="pct">100%</span></td><td class="y">846,596 <span class="pct">79%</span></td><td class="y">963,501 <span class="pct">90%</span></td><td class="r">10,576 <span class="pct">1.0%</span></td><td>0</td><td>0</td></tr>
-<tr><td>64</td><td>8</td><td class="g"><b>2,510,815</b> <span class="pct">100%</span></td><td class="y">2,053,641 <span class="pct">82%</span></td><td class="y">1,615,507 <span class="pct">64%</span></td><td class="r">81,506 <span class="pct">3.2%</span></td><td>0</td><td>0</td></tr>
-<tr><td>64</td><td>16</td><td class="g"><b>3,138,301</b> <span class="pct">100%</span></td><td class="y">2,571,843 <span class="pct">82%</span></td><td class="y">1,746,546 <span class="pct">56%</span></td><td class="r">273,715 <span class="pct">8.7%</span></td><td>0</td><td>0</td></tr>
-<tr><td>64</td><td>32</td><td class="g"><b>3,140,668</b> <span class="pct">100%</span></td><td class="y">2,769,533 <span class="pct">88%</span></td><td class="y">1,707,555 <span class="pct">54%</span></td><td class="r">490,294 <span class="pct">16%</span></td><td>0</td><td>0</td></tr>
-<tr><td>64</td><td>64</td><td class="g"><b>3,791,151</b> <span class="pct">100%</span></td><td class="y">3,166,092 <span class="pct">84%</span></td><td class="r">1,644,840 <span class="pct">43%</span></td><td class="y">3,656,214 <span class="pct">96%</span></td><td>0</td><td>0</td></tr>
-<tr><td>128</td><td>1</td><td class="g"><b>916,249</b> <span class="pct">100%</span></td><td class="y">644,950 <span class="pct">70%</span></td><td class="y">612,155 <span class="pct">67%</span></td><td class="r">7,570 <span class="pct">0.8%</span></td><td>0</td><td>0</td></tr>
-<tr><td>128</td><td>2</td><td class="y">828,467 <span class="pct">92%</span></td><td class="y">685,903 <span class="pct">76%</span></td><td class="g"><b>900,141</b> <span class="pct">100%</span></td><td class="r">20,765 <span class="pct">2.3%</span></td><td>0</td><td>0</td></tr>
-<tr><td>128</td><td>8</td><td class="g"><b>2,198,546</b> <span class="pct">100%</span></td><td class="y">1,937,252 <span class="pct">88%</span></td><td class="y">1,535,094 <span class="pct">70%</span></td><td class="r">125,652 <span class="pct">5.7%</span></td><td>0</td><td>0</td></tr>
-<tr><td>128</td><td>16</td><td class="g"><b>3,215,139</b> <span class="pct">100%</span></td><td class="y">2,501,044 <span class="pct">78%</span></td><td class="y">1,656,611 <span class="pct">52%</span></td><td class="r">366,695 <span class="pct">11%</span></td><td>0</td><td>0</td></tr>
-<tr><td>128</td><td>32</td><td class="g"><b>3,099,289</b> <span class="pct">100%</span></td><td class="y">2,575,639 <span class="pct">83%</span></td><td class="y">1,711,723 <span class="pct">55%</span></td><td class="r">847,550 <span class="pct">27%</span></td><td>0</td><td>0</td></tr>
-<tr><td>128</td><td>64</td><td class="y">3,000,066 <span class="pct">88%</span></td><td class="y">2,595,969 <span class="pct">76%</span></td><td class="r">1,700,450 <span class="pct">50%</span></td><td class="g"><b>3,397,904</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
-<tr><td>256</td><td>1</td><td class="g"><b>777,017</b> <span class="pct">100%</span></td><td class="y">622,132 <span class="pct">80%</span></td><td class="y">581,318 <span class="pct">75%</span></td><td class="r">19,598 <span class="pct">2.5%</span></td><td>0</td><td>0</td></tr>
-<tr><td>256</td><td>2</td><td class="y">779,386 <span class="pct">98%</span></td><td class="y">653,257 <span class="pct">82%</span></td><td class="g"><b>797,156</b> <span class="pct">100%</span></td><td class="r">29,302 <span class="pct">3.7%</span></td><td>0</td><td>0</td></tr>
-<tr><td>256</td><td>8</td><td class="g"><b>2,098,728</b> <span class="pct">100%</span></td><td class="y">1,666,053 <span class="pct">79%</span></td><td class="y">1,410,880 <span class="pct">67%</span></td><td class="r">255,954 <span class="pct">12%</span></td><td>0</td><td>0</td></tr>
-<tr><td>256</td><td>16</td><td class="g"><b>2,662,616</b> <span class="pct">100%</span></td><td class="y">2,170,355 <span class="pct">82%</span></td><td class="y">1,449,422 <span class="pct">54%</span></td><td class="r">535,960 <span class="pct">20%</span></td><td>0</td><td>0</td></tr>
-<tr><td>256</td><td>32</td><td class="g"><b>2,646,403</b> <span class="pct">100%</span></td><td class="y">2,477,188 <span class="pct">94%</span></td><td class="y">1,508,840 <span class="pct">57%</span></td><td class="r">1,313,721 <span class="pct">50%</span></td><td>0</td><td>0</td></tr>
-<tr><td>256</td><td>64</td><td class="y">2,782,705 <span class="pct">92%</span></td><td class="y">2,456,536 <span class="pct">81%</span></td><td class="r">1,601,963 <span class="pct">53%</span></td><td class="g"><b>3,034,838</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
-<tr><td>512</td><td>1</td><td class="g"><b>803,406</b> <span class="pct">100%</span></td><td class="y">610,656 <span class="pct">76%</span></td><td class="y">505,699 <span class="pct">63%</span></td><td class="r">26,587 <span class="pct">3.3%</span></td><td>0</td><td>0</td></tr>
-<tr><td>512</td><td>2</td><td class="y">772,463 <span class="pct">97%</span></td><td class="y">637,549 <span class="pct">80%</span></td><td class="g"><b>795,878</b> <span class="pct">100%</span></td><td class="r">53,922 <span class="pct">6.8%</span></td><td>0</td><td>0</td></tr>
-<tr><td>512</td><td>8</td><td class="g"><b>1,896,362</b> <span class="pct">100%</span></td><td class="y">1,574,148 <span class="pct">83%</span></td><td class="y">1,342,392 <span class="pct">71%</span></td><td class="r">273,380 <span class="pct">14%</span></td><td>0</td><td>0</td></tr>
-<tr><td>512</td><td>16</td><td class="g"><b>2,265,031</b> <span class="pct">100%</span></td><td class="y">2,092,808 <span class="pct">92%</span></td><td class="y">1,333,282 <span class="pct">59%</span></td><td class="r">815,468 <span class="pct">36%</span></td><td>0</td><td>0</td></tr>
-<tr><td>512</td><td>32</td><td class="g"><b>2,371,027</b> <span class="pct">100%</span></td><td class="y">2,261,160 <span class="pct">95%</span></td><td class="y">1,490,075 <span class="pct">63%</span></td><td class="r">1,203,139 <span class="pct">51%</span></td><td>0</td><td>0</td></tr>
-<tr><td>512</td><td>64</td><td class="y">2,492,765 <span class="pct">94%</span></td><td class="y">2,357,148 <span class="pct">89%</span></td><td class="r">1,592,426 <span class="pct">60%</span></td><td class="g"><b>2,643,559</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
-</table>
+<dl class="legend">
+<dt>req/s</dt><dd>completed responses per second. This is the only table where the four clients are
+directly comparable, so it is the only one rank-coloured green-to-red across the row</dd>
+<dt>failed requests</dt><dd>requests the client gave up on. Against h3x in shared-socket mode these
+are the 4-tuple churn described under "Why h3x drops requests"; the connection dies, whatever was in
+flight on it fails, and the pool re-dials</dd>
+<dt>server UDP drops</dt><dd>datagrams the kernel discarded on the <em>server's</em> socket because
+its receive buffer was full, read per cell from <code>/proc/net/udp</code>. Every drop we measured
+was a receive-buffer overflow (the per-socket counter, snmp <code>RcvbufErrors</code> and snmp
+<code>InErrors</code> were exactly equal). These cost throughput, not correctness: QUIC retransmits
+them. All three servers run the stock 212992-byte buffer (<code>net.core.rmem_max</code>), so this
+column is a drain-rate difference, not a buffer-size one</dd>
+</dl>
+</details>
+<h5>throughput</h5>
+<div class="scale"><span>0%</span><div class="ramp"><i style="background:color-mix(in oklab, var(--seq-a) 0%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 6%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 13%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 32%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)"></i></div><span>100%</span><em>share of the fastest client in that row</em></div>
+<div class="scroll"><table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:22%"></colgroup><tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h3x spc req/s</th><th>h2o-httpclient req/s</th><th>h2load req/s</th></tr>
+<tr><td>64</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">878,718 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 32%, transparent)">743,942<span class="pct">85%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">652,000<span class="pct">74%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 0%, transparent)">5,151<span class="pct">0.6%</span></td></tr>
+<tr><td>64</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,116,933 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 32%, transparent)">951,345<span class="pct">85%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">881,363<span class="pct">79%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 0%, transparent)">13,946<span class="pct">1.2%</span></td></tr>
+<tr><td>64</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">2,246,583 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">2,164,766<span class="pct">96%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">1,459,970<span class="pct">65%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 1%, transparent)">80,745<span class="pct">3.6%</span></td></tr>
+<tr><td>64</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,070,930<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,100,605 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">1,662,672<span class="pct">54%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 3%, transparent)">213,785<span class="pct">6.9%</span></td></tr>
+<tr><td>64</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,185,573 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 36%, transparent)">3,055,433<span class="pct">96%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 23%, transparent)">1,894,132<span class="pct">59%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 6%, transparent)">496,832<span class="pct">16%</span></td></tr>
+<tr><td>64</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,544,322 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 33%, transparent)">3,065,788<span class="pct">86%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">1,854,700<span class="pct">52%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 36%, transparent)">3,392,872<span class="pct">96%</span></td></tr>
+<tr><td>128</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">957,304 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 26%, transparent)">657,339<span class="pct">69%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">638,591<span class="pct">67%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 1%, transparent)">12,911<span class="pct">1.3%</span></td></tr>
+<tr><td>128</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">896,642<span class="pct">97%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">730,992<span class="pct">79%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">922,887 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 1%, transparent)">21,515<span class="pct">2.3%</span></td></tr>
+<tr><td>128</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">2,305,510 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 31%, transparent)">1,862,752<span class="pct">81%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">1,502,510<span class="pct">65%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 3%, transparent)">190,074<span class="pct">8.2%</span></td></tr>
+<tr><td>128</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">2,957,664 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 33%, transparent)">2,598,567<span class="pct">88%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 21%, transparent)">1,638,079<span class="pct">55%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 5%, transparent)">406,792<span class="pct">14%</span></td></tr>
+<tr><td>128</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,289,423 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 36%, transparent)">3,076,127<span class="pct">94%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">1,728,776<span class="pct">53%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 10%, transparent)">846,507<span class="pct">26%</span></td></tr>
+<tr><td>128</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,327,313 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 33%, transparent)">2,881,636<span class="pct">87%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">1,755,581<span class="pct">53%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,318,701<span class="pct">100%</span></td></tr>
+<tr><td>256</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">793,314 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">578,601<span class="pct">73%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">583,269<span class="pct">74%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 1%, transparent)">20,745<span class="pct">2.6%</span></td></tr>
+<tr><td>256</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">863,101 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">676,789<span class="pct">78%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">854,952<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 2%, transparent)">44,081<span class="pct">5.1%</span></td></tr>
+<tr><td>256</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">2,261,353 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">1,799,043<span class="pct">80%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">1,481,897<span class="pct">66%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 4%, transparent)">245,552<span class="pct">11%</span></td></tr>
+<tr><td>256</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,070,014 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 27%, transparent)">2,152,624<span class="pct">70%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)">1,514,190<span class="pct">49%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 7%, transparent)">586,296<span class="pct">19%</span></td></tr>
+<tr><td>256</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,061,832 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">2,435,090<span class="pct">80%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">1,576,935<span class="pct">52%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 17%, transparent)">1,335,831<span class="pct">44%</span></td></tr>
+<tr><td>256</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">3,031,436 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 32%, transparent)">2,564,537<span class="pct">85%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 21%, transparent)">1,660,582<span class="pct">55%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">2,956,722<span class="pct">98%</span></td></tr>
+<tr><td>512</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">835,002 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">607,341<span class="pct">73%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 23%, transparent)">510,145<span class="pct">61%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 1%, transparent)">29,840<span class="pct">3.6%</span></td></tr>
+<tr><td>512</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">892,699 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">647,111<span class="pct">72%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 32%, transparent)">761,260<span class="pct">85%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 2%, transparent)">57,537<span class="pct">6.4%</span></td></tr>
+<tr><td>512</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">2,144,369 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 29%, transparent)">1,629,363<span class="pct">76%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 24%, transparent)">1,337,890<span class="pct">62%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 6%, transparent)">344,426<span class="pct">16%</span></td></tr>
+<tr><td>512</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">2,529,035 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 33%, transparent)">2,180,332<span class="pct">86%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 21%, transparent)">1,372,627<span class="pct">54%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 12%, transparent)">820,524<span class="pct">32%</span></td></tr>
+<tr><td>512</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">2,485,235 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 36%, transparent)">2,378,075<span class="pct">96%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 22%, transparent)">1,424,768<span class="pct">57%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 22%, transparent)">1,420,611<span class="pct">57%</span></td></tr>
+<tr><td>512</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 36%, transparent)">2,484,220<span class="pct">94%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 35%, transparent)">2,414,493<span class="pct">91%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 23%, transparent)">1,631,567<span class="pct">61%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">2,654,307 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+</table></div>
+<h5>failed requests <span class="sub">summed over m</span></h5>
+<div class="scale"><span>0</span><div class="ramp"><i style="background:color-mix(in oklab, var(--seq-b) 0%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)"></i></div><span>max</span><em>log scale; untinted means zero</em></div>
+<div class="scroll"><table><colgroup><col style="width:7%"><col style="width:9%"><col span="4" style="width:21%"></colgroup><tr><th>conns</th><th>per socket</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td class="sub2">2</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">19</td><td class="zero">0</td></tr>
+<tr><td>128</td><td class="sub2">4</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">31</td><td class="zero">0</td></tr>
+<tr><td>256</td><td class="sub2">8</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 34%, transparent)">30</td><td class="zero">0</td></tr>
+<tr><td>512</td><td class="sub2">16</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 40%, transparent)">54</td><td class="zero">0</td></tr></table></div>
+<details><summary>per-cell breakdown, all 24 cells</summary>
+<div class="scroll"><table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:22%"></colgroup><tr><th>conns</th><th>m</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 12%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 23%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 27%, transparent)">4</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 27%, transparent)">4</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 12%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 19%, transparent)">2</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">5</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">7</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">7</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 23%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 12%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">9</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 41%, transparent)">10</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)">11</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">8</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">5</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)">11</td><td class="zero">0</td></tr>
+</table></div></details>
+<h5>server UDP datagrams dropped <span class="sub">receive-buffer overflow, summed over m</span></h5>
+<div class="scale"><span>0</span><div class="ramp"><i style="background:color-mix(in oklab, var(--seq-b) 0%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)"></i></div><span>max</span><em>log scale; untinted means zero</em></div>
+<div class="scroll"><table><colgroup><col style="width:7%"><col style="width:9%"><col span="4" style="width:21%"></colgroup><tr><th>conns</th><th>per socket</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td class="sub2">2</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td class="sub2">4</td><td style="background:color-mix(in oklab, var(--seq-b) 9%, transparent)">20</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td class="sub2">8</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">36,652</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">83,428</td><td style="background:color-mix(in oklab, var(--seq-b) 13%, transparent)">86</td><td class="zero">0</td></tr>
+<tr><td>512</td><td class="sub2">16</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">460,277</td><td style="background:color-mix(in oklab, var(--seq-b) 40%, transparent)">1,079,736</td><td style="background:color-mix(in oklab, var(--seq-b) 31%, transparent)">54,310</td><td style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)">1,459</td></tr></table></div>
+<details><summary>per-cell breakdown, all 24 cells</summary>
+<div class="scroll"><table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:22%"></colgroup><tr><th>conns</th><th>m</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 10%, transparent)">20</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">9,651</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">46,155</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 24%, transparent)">1,460</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">8,181</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>16</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 32%, transparent)">17,328</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 29%, transparent)">6,026</td><td style="background:color-mix(in oklab, var(--seq-b) 31%, transparent)">11,105</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">19,515</td><td style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)">659</td><td style="background:color-mix(in oklab, var(--seq-b) 15%, transparent)">86</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-b) 31%, transparent)">13,083</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">76,769</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">155,199</td><td style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)">320,308</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 13%, transparent)">48</td></tr>
+<tr><td>512</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">85,953</td><td style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)">348,563</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 34%, transparent)">26,539</td><td style="background:color-mix(in oklab, var(--seq-b) 40%, transparent)">208,880</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">78,478</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">80,526</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">9,137</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">101,025</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">44,690</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">45,173</td><td style="background:color-mix(in oklab, var(--seq-b) 24%, transparent)">1,411</td></tr>
+</table></div></details>
 <details><summary>Methodology &amp; caveats</summary>
-<p>h2load dropped 0 requests in all 72 cells. The h2load collapse at m=1-2 happens only against h2o
-(7k-54k req/s there vs 480k-820k against nginx and 410k-540k against haproxy): a pairing-specific
-interaction between ngtcp2 and the quicly server at low concurrency, not general client behavior.
-Against nginx the picture inverts for h3x: no GSO-batched responses means its GRO cannot engage,
-quicly pays full per-packet receive cost, and h2load leads 22 of 24 cells. Against haproxy the h3x
-family leads all 24. h2o-httpclient error lines were negligible
-(2-7 per cell, process-teardown artifacts) in every cell against nginx and up to 256 conns against
-h2o and haproxy; real volumes appeared only at 512 conns against h2o (516 at m=2, 2,051 at m=8,
-8,200 at m=32, 16,387 at m=64, uncharacterized by type) and mildly against haproxy (35-195). The
-spc column: zero drops in all 72 cells, on every server. Its throughput cost vs shared-socket mode
-is largest against h2o (4.6-29.6%, worst at 128 conns; the shared model's home ground is one socket
-to poll and batched sends) and a wash against haproxy (-10.5% to +26.6%, mean +0.1%). Single
-unpinned runs: differences under ~1.5x are within run-to-run noise.</p>
-<p><b>Mixed measurement dates.</b> The h3x and spc columns are from 2026-07-29; h2load and
-h2o-httpclient are from 2026-07-19 and were not re-run, since neither client changed and re-running
-would only add noise. Same box, same servers, same 1 KB object, but not the same sitting, so
-cross-column gaps carry a little more uncertainty than within-column ones. The 2026-07-29 grid was
-itself interrupted by a hard reset partway through the nginx spc table, so that one table spans a
-reboot: conns 64-128 and 256/m&le;16 predate it, the rest follow.</p>
+<p>h2load failed 0 requests in all 72 cells, on every server. Its collapse at m=1-2 happens only
+against h2o (5k-14k req/s there, recovering to 3.39M by m=64): a pairing-specific interaction
+between ngtcp2 and the quicly server at low concurrency, not general client behaviour. Against nginx
+the picture inverts for h3x: no GSO-batched responses means its GRO cannot engage, quicly pays full
+per-packet receive cost, and h2load leads 22 of 24 cells. Against haproxy the h3x family leads all
+24 and both rivals win nothing. h2o-httpclient's failures stay negligible throughout (134, 51 and
+131 over the three grids, process-teardown artifacts). The spc column costs +16.1% mean against h2o
+and +25.0% against nginx, and gains 1.9% against haproxy, where shared-socket mode is bleeding
+requests in the first place.</p>
+<p><b>All 288 cells are one sitting</b> (2026-07-29, bench/grid-v3.sh), same box, same servers, same
+1 KB object, so columns are directly comparable. Every cell re-derives the served object size from
+the client's own byte counters and the page refuses to build if any cell disagrees with the 1 KB
+file, because an earlier round of sweeps was silently invalidated by benchmarking a 20 KB object
+against 1 KB tables.</p>
+<p><b>Single unpinned runs.</b> One 10 s run per cell, no repeats. A control experiment across two
+grids, comparing cells whose configuration was byte-identical, saw swings from -17.6% to +13.5% with
+no consistent sign. So differences under roughly 20% here are not distinguishable from run-to-run
+variance, and only the large effects (the drop counts, the m=1-2 h2load collapse, the nginx
+inversion) should be read as real. Separating anything smaller needs repeated samples per cell.</p>
 </details>
 <details><summary>Why h3x (shared-socket mode) drops requests</summary>
 <p>The trigger is multiplexing many QUIC connections over one UDP socket per worker. Differential
 tests against haproxy: one connection per socket is flawless (32 conns / 32 sockets: 7.19M requests,
 0 drops, 0 re-dials; thread-count controlled separately with 4 conns / 4 sockets, also 0/0), while
 8 connections per socket, same 32 connections and same multiplexing, drops 1,428 and re-dials
-constantly (355k requests on resumed connections in 5 s, with no reconnect flag). Confirmed at scale
-by the h2o-httpclient grids and the spc column. Servers differ in how they tolerate multiple QUIC
+constantly (355k requests on resumed connections in 5 s, with no reconnect flag). Confirmed at scale by the spc column, which fails 0 requests against nginx and 1,904 against
+haproxy versus shared-socket h3x's 3,914 and 53,372. Servers differ in how they tolerate multiple QUIC
 connections sharing a 4-tuple: h2o accepts it (this is h2o's own client architecture), nginx churns
 moderately, haproxy constantly. Every drop surfaces as "I/O error" at stream attach: a shared-socket
 connection dies, whatever was in flight on it fails, the pool re-dials with the cached ticket, and
@@ -157,6 +317,9 @@ per connection, the h2load model), the spc column.</p>
 </details>
 </section>
 <section class="panel" id="pan-nginx">
+<h4>vs nginx (OpenSSL-QUIC, docker, 12 workers)</h4>
+<div class="tiles"><div class="tile"><div class="tl">fastest client</div><div class="tv">h2load</div><div class="ts">1.73M req/s at 64 conns, m=64</div></div><div class="tile"><div class="tl">cells won</div><div class="tv">22<span class='of'>/24</span></div><div class="ts">h2load 22, h3x 2</div></div><div class="tile"><div class="tl">most failed requests</div><div class="tv">4k</div><div class="ts">h3x; total across all clients 4k</div></div><div class="tile"><div class="tl">most server UDP drops</div><div class="tv">4.98M</div><div class="ts">h2o-httpclient; total across all clients 10.63M</div></div></div>
+<details class="key"><summary>What the four clients are, and what each table measures</summary>
 <dl class="legend">
 <dt>h3x</dt><dd>this project, 32 worker threads, each multiplexing its share of the connections
 over one UDP socket (connections share the thread's 4-tuple, distinguished by QUIC connection ID)</dd>
@@ -170,62 +333,147 @@ completions counted from status lines. At 256-512 connections that is 256-512 pr
 ceiling</dd>
 <dt>h2load</dt><dd>nghttp2's load tool on the ngtcp2 stack, one socket per connection</dd>
 </dl>
-<h4>vs nginx (OpenSSL-QUIC, docker, 12 workers)</h4>
-<table>
-<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:18%"><col span="2" style="width:8%"></colgroup><tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h3x spc req/s</th><th>h2o-httpclient req/s</th><th>h2load req/s</th><th>h3x drops</th><th>spc drops</th></tr>
-<tr><td>64</td><td>1</td><td class="y">519,545 <span class="pct">93%</span></td><td class="r">411,283 <span class="pct">73%</span></td><td class="y">499,132 <span class="pct">89%</span></td><td class="g"><b>560,188</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
-<tr><td>64</td><td>2</td><td class="y">504,238 <span class="pct">61%</span></td><td class="r">474,632 <span class="pct">58%</span></td><td class="y">589,304 <span class="pct">72%</span></td><td class="g"><b>820,102</b> <span class="pct">100%</span></td><td>6</td><td>0</td></tr>
-<tr><td>64</td><td>8</td><td class="y">730,334 <span class="pct">54%</span></td><td class="r">643,755 <span class="pct">48%</span></td><td class="y">679,683 <span class="pct">50%</span></td><td class="g"><b>1,353,200</b> <span class="pct">100%</span></td><td>12</td><td>0</td></tr>
-<tr><td>64</td><td>16</td><td class="y">981,161 <span class="pct">62%</span></td><td class="y">866,332 <span class="pct">55%</span></td><td class="r">696,216 <span class="pct">44%</span></td><td class="g"><b>1,585,622</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
-<tr><td>64</td><td>32</td><td class="y">1,117,358 <span class="pct">69%</span></td><td class="y">957,720 <span class="pct">59%</span></td><td class="r">683,582 <span class="pct">42%</span></td><td class="g"><b>1,628,570</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
-<tr><td>64</td><td>64</td><td class="y">1,175,401 <span class="pct">71%</span></td><td class="y">933,973 <span class="pct">57%</span></td><td class="r">711,043 <span class="pct">43%</span></td><td class="g"><b>1,648,319</b> <span class="pct">100%</span></td><td>96</td><td>0</td></tr>
-<tr><td>128</td><td>1</td><td class="y">531,201 <span class="pct">96%</span></td><td class="r">406,814 <span class="pct">73%</span></td><td class="y">470,220 <span class="pct">85%</span></td><td class="g"><b>555,676</b> <span class="pct">100%</span></td><td>3</td><td>0</td></tr>
-<tr><td>128</td><td>2</td><td class="y">536,964 <span class="pct">68%</span></td><td class="r">420,319 <span class="pct">54%</span></td><td class="y">479,485 <span class="pct">61%</span></td><td class="g"><b>784,103</b> <span class="pct">100%</span></td><td>17</td><td>0</td></tr>
-<tr><td>128</td><td>8</td><td class="y">832,723 <span class="pct">65%</span></td><td class="y">712,210 <span class="pct">56%</span></td><td class="r">531,661 <span class="pct">42%</span></td><td class="g"><b>1,273,322</b> <span class="pct">100%</span></td><td>40</td><td>0</td></tr>
-<tr><td>128</td><td>16</td><td class="y">972,874 <span class="pct">70%</span></td><td class="y">764,993 <span class="pct">55%</span></td><td class="r">581,944 <span class="pct">42%</span></td><td class="g"><b>1,387,994</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
-<tr><td>128</td><td>32</td><td class="y">1,089,472 <span class="pct">73%</span></td><td class="y">806,096 <span class="pct">54%</span></td><td class="r">658,325 <span class="pct">44%</span></td><td class="g"><b>1,487,968</b> <span class="pct">100%</span></td><td>459</td><td>0</td></tr>
-<tr><td>128</td><td>64</td><td class="y">1,140,644 <span class="pct">74%</span></td><td class="y">840,808 <span class="pct">54%</span></td><td class="r">695,814 <span class="pct">45%</span></td><td class="g"><b>1,549,483</b> <span class="pct">100%</span></td><td>1,069</td><td>0</td></tr>
-<tr><td>256</td><td>1</td><td class="g"><b>535,802</b> <span class="pct">100%</span></td><td class="r">388,723 <span class="pct">73%</span></td><td class="y">446,619 <span class="pct">83%</span></td><td class="y">526,289 <span class="pct">98%</span></td><td>25</td><td>0</td></tr>
-<tr><td>256</td><td>2</td><td class="y">533,496 <span class="pct">69%</span></td><td class="r">409,198 <span class="pct">53%</span></td><td class="y">456,137 <span class="pct">59%</span></td><td class="g"><b>769,199</b> <span class="pct">100%</span></td><td>28</td><td>0</td></tr>
-<tr><td>256</td><td>8</td><td class="y">848,046 <span class="pct">71%</span></td><td class="y">654,013 <span class="pct">55%</span></td><td class="r">506,681 <span class="pct">42%</span></td><td class="g"><b>1,194,853</b> <span class="pct">100%</span></td><td>245</td><td>0</td></tr>
-<tr><td>256</td><td>16</td><td class="y">974,856 <span class="pct">72%</span></td><td class="y">779,089 <span class="pct">58%</span></td><td class="r">608,960 <span class="pct">45%</span></td><td class="g"><b>1,352,111</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
-<tr><td>256</td><td>32</td><td class="y">1,077,233 <span class="pct">77%</span></td><td class="y">962,352 <span class="pct">69%</span></td><td class="r">692,947 <span class="pct">50%</span></td><td class="g"><b>1,390,804</b> <span class="pct">100%</span></td><td>381</td><td>0</td></tr>
-<tr><td>256</td><td>64</td><td class="y">1,082,331 <span class="pct">73%</span></td><td class="y">982,441 <span class="pct">67%</span></td><td class="r">713,916 <span class="pct">48%</span></td><td class="g"><b>1,475,488</b> <span class="pct">100%</span></td><td>258</td><td>0</td></tr>
-<tr><td>512</td><td>1</td><td class="g"><b>547,591</b> <span class="pct">100%</span></td><td class="y">392,697 <span class="pct">72%</span></td><td class="r">391,651 <span class="pct">72%</span></td><td class="y">483,681 <span class="pct">88%</span></td><td>57</td><td>0</td></tr>
-<tr><td>512</td><td>2</td><td class="y">558,010 <span class="pct">77%</span></td><td class="y">428,463 <span class="pct">59%</span></td><td class="r">425,866 <span class="pct">59%</span></td><td class="g"><b>721,959</b> <span class="pct">100%</span></td><td>76</td><td>0</td></tr>
-<tr><td>512</td><td>8</td><td class="y">808,328 <span class="pct">69%</span></td><td class="y">691,992 <span class="pct">59%</span></td><td class="r">564,968 <span class="pct">48%</span></td><td class="g"><b>1,171,295</b> <span class="pct">100%</span></td><td>71</td><td>0</td></tr>
-<tr><td>512</td><td>16</td><td class="y">925,212 <span class="pct">73%</span></td><td class="y">782,782 <span class="pct">62%</span></td><td class="r">662,338 <span class="pct">52%</span></td><td class="g"><b>1,263,867</b> <span class="pct">100%</span></td><td>785</td><td>0</td></tr>
-<tr><td>512</td><td>32</td><td class="y">1,016,398 <span class="pct">74%</span></td><td class="y">892,080 <span class="pct">65%</span></td><td class="r">709,965 <span class="pct">52%</span></td><td class="g"><b>1,370,700</b> <span class="pct">100%</span></td><td>0</td><td>0</td></tr>
-<tr><td>512</td><td>64</td><td class="y">1,046,605 <span class="pct">76%</span></td><td class="y">979,538 <span class="pct">71%</span></td><td class="r">750,774 <span class="pct">54%</span></td><td class="g"><b>1,382,457</b> <span class="pct">100%</span></td><td>2,360</td><td>0</td></tr>
-</table>
+<dl class="legend">
+<dt>req/s</dt><dd>completed responses per second. This is the only table where the four clients are
+directly comparable, so it is the only one rank-coloured green-to-red across the row</dd>
+<dt>failed requests</dt><dd>requests the client gave up on. Against h3x in shared-socket mode these
+are the 4-tuple churn described under "Why h3x drops requests"; the connection dies, whatever was in
+flight on it fails, and the pool re-dials</dd>
+<dt>server UDP drops</dt><dd>datagrams the kernel discarded on the <em>server's</em> socket because
+its receive buffer was full, read per cell from <code>/proc/net/udp</code>. Every drop we measured
+was a receive-buffer overflow (the per-socket counter, snmp <code>RcvbufErrors</code> and snmp
+<code>InErrors</code> were exactly equal). These cost throughput, not correctness: QUIC retransmits
+them. All three servers run the stock 212992-byte buffer (<code>net.core.rmem_max</code>), so this
+column is a drain-rate difference, not a buffer-size one</dd>
+</dl>
+</details>
+<h5>throughput</h5>
+<div class="scale"><span>0%</span><div class="ramp"><i style="background:color-mix(in oklab, var(--seq-a) 0%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 6%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 13%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 32%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)"></i></div><span>100%</span><em>share of the fastest client in that row</em></div>
+<div class="scroll"><table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:22%"></colgroup><tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h3x spc req/s</th><th>h2o-httpclient req/s</th><th>h2load req/s</th></tr>
+<tr><td>64</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">534,046 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">418,842<span class="pct">78%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 31%, transparent)">433,174<span class="pct">81%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 33%, transparent)">465,109<span class="pct">87%</span></td></tr>
+<tr><td>64</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">531,200<span class="pct">66%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 21%, transparent)">441,938<span class="pct">55%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 24%, transparent)">507,008<span class="pct">63%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">803,137 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>64</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 24%, transparent)">826,675<span class="pct">62%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 21%, transparent)">739,909<span class="pct">55%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 17%, transparent)">584,262<span class="pct">44%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,333,435 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>64</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">1,026,357<span class="pct">67%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 22%, transparent)">881,942<span class="pct">57%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 15%, transparent)">597,109<span class="pct">39%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,541,618 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>64</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 26%, transparent)">1,167,410<span class="pct">69%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 21%, transparent)">946,382<span class="pct">56%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 14%, transparent)">626,605<span class="pct">37%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,687,661 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>64</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">1,254,755<span class="pct">72%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 21%, transparent)">968,401<span class="pct">56%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 15%, transparent)">695,291<span class="pct">40%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,732,569 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>128</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">555,395<span class="pct">97%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 24%, transparent)">360,431<span class="pct">63%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 31%, transparent)">464,479<span class="pct">81%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">573,442 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>128</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">545,893<span class="pct">65%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)">412,396<span class="pct">49%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 22%, transparent)">484,396<span class="pct">58%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">839,093 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>128</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 26%, transparent)">876,452<span class="pct">68%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">673,327<span class="pct">52%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 16%, transparent)">528,885<span class="pct">41%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,290,878 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>128</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">1,064,025<span class="pct">73%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">781,746<span class="pct">53%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 14%, transparent)">557,225<span class="pct">38%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,464,982 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>128</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 29%, transparent)">1,213,362<span class="pct">78%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 22%, transparent)">921,406<span class="pct">59%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 16%, transparent)">654,300<span class="pct">42%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,563,092 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>128</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 27%, transparent)">1,171,148<span class="pct">71%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">862,902<span class="pct">53%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 17%, transparent)">716,581<span class="pct">44%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,642,759 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>256</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">517,756<span class="pct">97%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 27%, transparent)">375,919<span class="pct">70%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 31%, transparent)">439,516<span class="pct">82%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">534,139 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>256</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 27%, transparent)">570,111<span class="pct">70%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 16%, transparent)">348,897<span class="pct">43%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 22%, transparent)">470,409<span class="pct">58%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">815,479 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>256</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 26%, transparent)">868,184<span class="pct">69%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 18%, transparent)">599,557<span class="pct">48%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 15%, transparent)">507,670<span class="pct">40%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,262,079 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>256</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 27%, transparent)">992,499<span class="pct">72%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">741,420<span class="pct">54%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 17%, transparent)">616,023<span class="pct">45%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,382,786 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>256</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">1,139,007<span class="pct">79%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 22%, transparent)">852,642<span class="pct">59%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)">706,440<span class="pct">49%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,450,029 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>256</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 29%, transparent)">1,187,255<span class="pct">75%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 22%, transparent)">930,394<span class="pct">59%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)">770,548<span class="pct">49%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,574,516 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>512</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">587,593 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 23%, transparent)">358,281<span class="pct">61%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 26%, transparent)">404,550<span class="pct">69%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 33%, transparent)">517,793<span class="pct">88%</span></td></tr>
+<tr><td>512</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">588,367<span class="pct">79%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">393,860<span class="pct">53%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 23%, transparent)">440,010<span class="pct">59%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">742,717 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>512</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 29%, transparent)">890,489<span class="pct">76%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">610,918<span class="pct">52%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)">579,849<span class="pct">49%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,174,973 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>512</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 29%, transparent)">1,013,698<span class="pct">77%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">681,482<span class="pct">52%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">680,189<span class="pct">52%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,313,310 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>512</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 29%, transparent)">1,050,215<span class="pct">78%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 23%, transparent)">821,255<span class="pct">61%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">720,442<span class="pct">53%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,354,465 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+<tr><td>512</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 26%, transparent)">962,504<span class="pct">70%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 24%, transparent)">877,661<span class="pct">63%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 21%, transparent)">767,331<span class="pct">55%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,382,747 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td></tr>
+</table></div>
+<h5>failed requests <span class="sub">summed over m</span></h5>
+<div class="scale"><span>0</span><div class="ramp"><i style="background:color-mix(in oklab, var(--seq-b) 0%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)"></i></div><span>max</span><em>log scale; untinted means zero</em></div>
+<div class="scroll"><table><colgroup><col style="width:7%"><col style="width:9%"><col span="4" style="width:21%"></colgroup><tr><th>conns</th><th>per socket</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td class="sub2">2</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">3</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 8%, transparent)">5</td><td class="zero">0</td></tr>
+<tr><td>128</td><td class="sub2">4</td><td style="background:color-mix(in oklab, var(--seq-b) 27%, transparent)">350</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 13%, transparent)">14</td><td class="zero">0</td></tr>
+<tr><td>256</td><td class="sub2">8</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">1,869</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 12%, transparent)">12</td><td class="zero">0</td></tr>
+<tr><td>512</td><td class="sub2">16</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">1,692</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)">20</td><td class="zero">0</td></tr></table></div>
+<details><summary>per-cell breakdown, all 24 cells</summary>
+<div class="scroll"><table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:22%"></colgroup><tr><th>conns</th><th>m</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 8%, transparent)">3</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 4%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 8%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 4%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-b) 11%, transparent)">6</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 4%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)">10</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">2</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 24%, transparent)">60</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 9%, transparent)">4</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 26%, transparent)">82</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">2</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 8%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 31%, transparent)">192</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">2</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 4%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)">10</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 8%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 25%, transparent)">72</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">2</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 9%, transparent)">4</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">415</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 4%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)">1,372</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 4%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 11%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 23%, transparent)">48</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 4%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">185</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 11%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">300</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 11%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 36%, transparent)">531</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 4%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">628</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+</table></div></details>
+<h5>server UDP datagrams dropped <span class="sub">receive-buffer overflow, summed over m</span></h5>
+<div class="scale"><span>0</span><div class="ramp"><i style="background:color-mix(in oklab, var(--seq-b) 0%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)"></i></div><span>max</span><em>log scale; untinted means zero</em></div>
+<div class="scroll"><table><colgroup><col style="width:7%"><col style="width:9%"><col span="4" style="width:21%"></colgroup><tr><th>conns</th><th>per socket</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td class="sub2">2</td><td style="background:color-mix(in oklab, var(--seq-b) 27%, transparent)">27,218</td><td style="background:color-mix(in oklab, var(--seq-b) 31%, transparent)">100,838</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">207,098</td><td style="background:color-mix(in oklab, var(--seq-b) 13%, transparent)">138</td></tr>
+<tr><td>128</td><td class="sub2">4</td><td style="background:color-mix(in oklab, var(--seq-b) 31%, transparent)">85,062</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">414,658</td><td style="background:color-mix(in oklab, var(--seq-b) 36%, transparent)">769,979</td><td style="background:color-mix(in oklab, var(--seq-b) 20%, transparent)">1,416</td></tr>
+<tr><td>256</td><td class="sub2">8</td><td style="background:color-mix(in oklab, var(--seq-b) 36%, transparent)">568,862</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">974,746</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">1,557,677</td><td style="background:color-mix(in oklab, var(--seq-b) 22%, transparent)">3,770</td></tr>
+<tr><td>512</td><td class="sub2">16</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">1,694,869</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">1,733,211</td><td style="background:color-mix(in oklab, var(--seq-b) 40%, transparent)">2,449,586</td><td style="background:color-mix(in oklab, var(--seq-b) 29%, transparent)">40,292</td></tr></table></div>
+<details><summary>per-cell breakdown, all 24 cells</summary>
+<div class="scroll"><table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:22%"></colgroup><tr><th>conns</th><th>m</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 3%, transparent)">2</td></tr>
+<tr><td>64</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">6</td></tr>
+<tr><td>64</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">22,500</td><td style="background:color-mix(in oklab, var(--seq-b) 29%, transparent)">15,312</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">19,499</td><td style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)">10</td></tr>
+<tr><td>64</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 26%, transparent)">4,718</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">85,526</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">187,599</td><td style="background:color-mix(in oklab, var(--seq-b) 15%, transparent)">120</td></tr>
+<tr><td>128</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>2</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 15%, transparent)">158</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>8</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">19,355</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 16%, transparent)">224</td></tr>
+<tr><td>128</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 17%, transparent)">268</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">58,791</td><td style="background:color-mix(in oklab, var(--seq-b) 32%, transparent)">31,686</td><td style="background:color-mix(in oklab, var(--seq-b) 12%, transparent)">51</td></tr>
+<tr><td>128</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">17,580</td><td style="background:color-mix(in oklab, var(--seq-b) 36%, transparent)">126,709</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">233,704</td><td style="background:color-mix(in oklab, var(--seq-b) 18%, transparent)">411</td></tr>
+<tr><td>128</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 34%, transparent)">67,214</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">209,645</td><td style="background:color-mix(in oklab, var(--seq-b) 40%, transparent)">504,589</td><td style="background:color-mix(in oklab, var(--seq-b) 20%, transparent)">730</td></tr>
+<tr><td>256</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)">104</td><td style="background:color-mix(in oklab, var(--seq-b) 34%, transparent)">79,355</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 32%, transparent)">43,859</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">198,799</td><td style="background:color-mix(in oklab, var(--seq-b) 29%, transparent)">15,817</td><td style="background:color-mix(in oklab, var(--seq-b) 18%, transparent)">399</td></tr>
+<tr><td>256</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 36%, transparent)">135,745</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">239,907</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">225,286</td><td style="background:color-mix(in oklab, var(--seq-b) 23%, transparent)">1,783</td></tr>
+<tr><td>256</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">176,973</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">226,583</td><td style="background:color-mix(in oklab, var(--seq-b) 40%, transparent)">515,796</td><td style="background:color-mix(in oklab, var(--seq-b) 22%, transparent)">1,464</td></tr>
+<tr><td>256</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">212,181</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">230,102</td><td style="background:color-mix(in oklab, var(--seq-b) 41%, transparent)">800,778</td><td style="background:color-mix(in oklab, var(--seq-b) 15%, transparent)">124</td></tr>
+<tr><td>512</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-b) 32%, transparent)">36,558</td><td style="background:color-mix(in oklab, var(--seq-b) 33%, transparent)">57,582</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)">10,114</td></tr>
+<tr><td>512</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">179,019</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">310,382</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)">1,118</td></tr>
+<tr><td>512</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">355,667</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">411,926</td><td style="background:color-mix(in oklab, var(--seq-b) 37%, transparent)">191,572</td><td style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)">9,643</td></tr>
+<tr><td>512</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">409,815</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">327,348</td><td style="background:color-mix(in oklab, var(--seq-b) 40%, transparent)">464,700</td><td style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)">9,271</td></tr>
+<tr><td>512</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">366,039</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">314,080</td><td style="background:color-mix(in oklab, var(--seq-b) 41%, transparent)">793,768</td><td style="background:color-mix(in oklab, var(--seq-b) 26%, transparent)">5,502</td></tr>
+<tr><td>512</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 39%, transparent)">347,771</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">311,893</td><td style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)">999,546</td><td style="background:color-mix(in oklab, var(--seq-b) 26%, transparent)">4,644</td></tr>
+</table></div></details>
 <details><summary>Methodology &amp; caveats</summary>
-<p>h2load dropped 0 requests in all 72 cells. The h2load collapse at m=1-2 happens only against h2o
-(7k-54k req/s there vs 480k-820k against nginx and 410k-540k against haproxy): a pairing-specific
-interaction between ngtcp2 and the quicly server at low concurrency, not general client behavior.
-Against nginx the picture inverts for h3x: no GSO-batched responses means its GRO cannot engage,
-quicly pays full per-packet receive cost, and h2load leads 22 of 24 cells. Against haproxy the h3x
-family leads all 24. h2o-httpclient error lines were negligible
-(2-7 per cell, process-teardown artifacts) in every cell against nginx and up to 256 conns against
-h2o and haproxy; real volumes appeared only at 512 conns against h2o (516 at m=2, 2,051 at m=8,
-8,200 at m=32, 16,387 at m=64, uncharacterized by type) and mildly against haproxy (35-195). The
-spc column: zero drops in all 72 cells, on every server. Its throughput cost vs shared-socket mode
-is largest against h2o (4.6-29.6%, worst at 128 conns; the shared model's home ground is one socket
-to poll and batched sends) and a wash against haproxy (-10.5% to +26.6%, mean +0.1%). Single
-unpinned runs: differences under ~1.5x are within run-to-run noise.</p>
-<p><b>Mixed measurement dates.</b> The h3x and spc columns are from 2026-07-29; h2load and
-h2o-httpclient are from 2026-07-19 and were not re-run, since neither client changed and re-running
-would only add noise. Same box, same servers, same 1 KB object, but not the same sitting, so
-cross-column gaps carry a little more uncertainty than within-column ones. The 2026-07-29 grid was
-itself interrupted by a hard reset partway through the nginx spc table, so that one table spans a
-reboot: conns 64-128 and 256/m&le;16 predate it, the rest follow.</p>
+<p>h2load failed 0 requests in all 72 cells, on every server. Its collapse at m=1-2 happens only
+against h2o (5k-14k req/s there, recovering to 3.39M by m=64): a pairing-specific interaction
+between ngtcp2 and the quicly server at low concurrency, not general client behaviour. Against nginx
+the picture inverts for h3x: no GSO-batched responses means its GRO cannot engage, quicly pays full
+per-packet receive cost, and h2load leads 22 of 24 cells. Against haproxy the h3x family leads all
+24 and both rivals win nothing. h2o-httpclient's failures stay negligible throughout (134, 51 and
+131 over the three grids, process-teardown artifacts). The spc column costs +16.1% mean against h2o
+and +25.0% against nginx, and gains 1.9% against haproxy, where shared-socket mode is bleeding
+requests in the first place.</p>
+<p><b>All 288 cells are one sitting</b> (2026-07-29, bench/grid-v3.sh), same box, same servers, same
+1 KB object, so columns are directly comparable. Every cell re-derives the served object size from
+the client's own byte counters and the page refuses to build if any cell disagrees with the 1 KB
+file, because an earlier round of sweeps was silently invalidated by benchmarking a 20 KB object
+against 1 KB tables.</p>
+<p><b>Single unpinned runs.</b> One 10 s run per cell, no repeats. A control experiment across two
+grids, comparing cells whose configuration was byte-identical, saw swings from -17.6% to +13.5% with
+no consistent sign. So differences under roughly 20% here are not distinguishable from run-to-run
+variance, and only the large effects (the drop counts, the m=1-2 h2load collapse, the nginx
+inversion) should be read as real. Separating anything smaller needs repeated samples per cell.</p>
 </details>
 <details><summary>Why h3x (shared-socket mode) drops requests</summary>
 <p>The trigger is multiplexing many QUIC connections over one UDP socket per worker. Differential
 tests against haproxy: one connection per socket is flawless (32 conns / 32 sockets: 7.19M requests,
 0 drops, 0 re-dials; thread-count controlled separately with 4 conns / 4 sockets, also 0/0), while
 8 connections per socket, same 32 connections and same multiplexing, drops 1,428 and re-dials
-constantly (355k requests on resumed connections in 5 s, with no reconnect flag). Confirmed at scale
-by the h2o-httpclient grids and the spc column. Servers differ in how they tolerate multiple QUIC
+constantly (355k requests on resumed connections in 5 s, with no reconnect flag). Confirmed at scale by the spc column, which fails 0 requests against nginx and 1,904 against
+haproxy versus shared-socket h3x's 3,914 and 53,372. Servers differ in how they tolerate multiple QUIC
 connections sharing a 4-tuple: h2o accepts it (this is h2o's own client architecture), nginx churns
 moderately, haproxy constantly. Every drop surfaces as "I/O error" at stream attach: a shared-socket
 connection dies, whatever was in flight on it fails, the pool re-dials with the cached ticket, and
@@ -237,6 +485,9 @@ per connection, the h2load model), the spc column.</p>
 </details>
 </section>
 <section class="panel" id="pan-haproxy">
+<h4>vs haproxy (HAProxy QUIC, docker, nbthread 12)</h4>
+<div class="tiles"><div class="tile"><div class="tl">fastest client</div><div class="tv">h3x spc</div><div class="ts">1.45M req/s at 64 conns, m=64</div></div><div class="tile"><div class="tl">cells won</div><div class="tv">12<span class='of'>/24</span></div><div class="ts">h3x 12, h3x spc 12</div></div><div class="tile"><div class="tl">most failed requests</div><div class="tv">53k</div><div class="ts">h3x; total across all clients 55k</div></div><div class="tile"><div class="tl">most server UDP drops</div><div class="tv">43</div><div class="ts">h2load; total across all clients 46</div></div></div>
+<details class="key"><summary>What the four clients are, and what each table measures</summary>
 <dl class="legend">
 <dt>h3x</dt><dd>this project, 32 worker threads, each multiplexing its share of the connections
 over one UDP socket (connections share the thread's 4-tuple, distinguished by QUIC connection ID)</dd>
@@ -250,62 +501,147 @@ completions counted from status lines. At 256-512 connections that is 256-512 pr
 ceiling</dd>
 <dt>h2load</dt><dd>nghttp2's load tool on the ngtcp2 stack, one socket per connection</dd>
 </dl>
-<h4>vs haproxy (HAProxy QUIC, docker, nbthread 12)</h4>
-<table>
-<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:18%"><col span="2" style="width:8%"></colgroup><tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h3x spc req/s</th><th>h2o-httpclient req/s</th><th>h2load req/s</th><th>h3x drops</th><th>spc drops</th></tr>
-<tr><td>64</td><td>1</td><td class="g"><b>507,744</b> <span class="pct">100%</span></td><td class="y">486,417 <span class="pct">96%</span></td><td class="y">458,792 <span class="pct">90%</span></td><td class="r">409,628 <span class="pct">81%</span></td><td>12</td><td>0</td></tr>
-<tr><td>64</td><td>2</td><td class="g"><b>618,359</b> <span class="pct">100%</span></td><td class="y">600,386 <span class="pct">97%</span></td><td class="r">486,394 <span class="pct">79%</span></td><td class="y">519,830 <span class="pct">84%</span></td><td>18</td><td>0</td></tr>
-<tr><td>64</td><td>8</td><td class="g"><b>870,762</b> <span class="pct">100%</span></td><td class="y">824,829 <span class="pct">95%</span></td><td class="r">586,024 <span class="pct">67%</span></td><td class="y">737,189 <span class="pct">85%</span></td><td>36</td><td>0</td></tr>
-<tr><td>64</td><td>16</td><td class="y">1,181,497 <span class="pct">99%</span></td><td class="g"><b>1,190,511</b> <span class="pct">100%</span></td><td class="r">777,151 <span class="pct">65%</span></td><td class="y">958,858 <span class="pct">81%</span></td><td>72</td><td>0</td></tr>
-<tr><td>64</td><td>32</td><td class="y">1,332,146 <span class="pct">94%</span></td><td class="g"><b>1,417,384</b> <span class="pct">100%</span></td><td class="r">929,701 <span class="pct">66%</span></td><td class="y">1,238,902 <span class="pct">87%</span></td><td>240</td><td>0</td></tr>
-<tr><td>64</td><td>64</td><td class="y">1,487,177 <span class="pct">98%</span></td><td class="g"><b>1,514,005</b> <span class="pct">100%</span></td><td class="r">1,074,616 <span class="pct">71%</span></td><td class="y">1,377,461 <span class="pct">91%</span></td><td>192</td><td>0</td></tr>
-<tr><td>128</td><td>1</td><td class="g"><b>505,503</b> <span class="pct">100%</span></td><td class="y">494,667 <span class="pct">98%</span></td><td class="r">392,484 <span class="pct">78%</span></td><td class="y">462,545 <span class="pct">92%</span></td><td>15</td><td>0</td></tr>
-<tr><td>128</td><td>2</td><td class="g"><b>583,839</b> <span class="pct">100%</span></td><td class="y">552,595 <span class="pct">95%</span></td><td class="r">416,965 <span class="pct">71%</span></td><td class="y">530,206 <span class="pct">91%</span></td><td>43</td><td>0</td></tr>
-<tr><td>128</td><td>8</td><td class="g"><b>1,008,552</b> <span class="pct">100%</span></td><td class="y">951,510 <span class="pct">94%</span></td><td class="r">510,760 <span class="pct">51%</span></td><td class="y">685,602 <span class="pct">68%</span></td><td>210</td><td>0</td></tr>
-<tr><td>128</td><td>16</td><td class="y">1,172,514 <span class="pct">98%</span></td><td class="g"><b>1,192,179</b> <span class="pct">100%</span></td><td class="r">719,554 <span class="pct">60%</span></td><td class="y">927,248 <span class="pct">78%</span></td><td>351</td><td>0</td></tr>
-<tr><td>128</td><td>32</td><td class="y">1,288,531 <span class="pct">99%</span></td><td class="g"><b>1,298,748</b> <span class="pct">100%</span></td><td class="r">850,144 <span class="pct">65%</span></td><td class="y">1,082,862 <span class="pct">83%</span></td><td>1,316</td><td>0</td></tr>
-<tr><td>128</td><td>64</td><td class="y">1,324,491 <span class="pct">100%</span></td><td class="g"><b>1,327,419</b> <span class="pct">100%</span></td><td class="r">925,740 <span class="pct">70%</span></td><td class="y">1,153,955 <span class="pct">87%</span></td><td>1,737</td><td>0</td></tr>
-<tr><td>256</td><td>1</td><td class="y">514,708 <span class="pct">99%</span></td><td class="g"><b>521,539</b> <span class="pct">100%</span></td><td class="r">353,909 <span class="pct">68%</span></td><td class="y">476,616 <span class="pct">91%</span></td><td>104</td><td>0</td></tr>
-<tr><td>256</td><td>2</td><td class="g"><b>569,201</b> <span class="pct">100%</span></td><td class="y">537,007 <span class="pct">94%</span></td><td class="r">400,481 <span class="pct">70%</span></td><td class="y">538,703 <span class="pct">95%</span></td><td>114</td><td>0</td></tr>
-<tr><td>256</td><td>8</td><td class="y">945,322 <span class="pct">99%</span></td><td class="g"><b>954,306</b> <span class="pct">100%</span></td><td class="r">470,801 <span class="pct">49%</span></td><td class="y">628,809 <span class="pct">66%</span></td><td>570</td><td>0</td></tr>
-<tr><td>256</td><td>16</td><td class="g"><b>1,148,278</b> <span class="pct">100%</span></td><td class="y">1,098,395 <span class="pct">96%</span></td><td class="r">643,948 <span class="pct">56%</span></td><td class="y">828,462 <span class="pct">72%</span></td><td>1,508</td><td>0</td></tr>
-<tr><td>256</td><td>32</td><td class="g"><b>1,290,018</b> <span class="pct">100%</span></td><td class="y">1,153,993 <span class="pct">89%</span></td><td class="r">694,476 <span class="pct">54%</span></td><td class="y">913,045 <span class="pct">71%</span></td><td>1,598</td><td>0</td></tr>
-<tr><td>256</td><td>64</td><td class="g"><b>1,182,380</b> <span class="pct">100%</span></td><td class="y">1,155,661 <span class="pct">98%</span></td><td class="r">688,375 <span class="pct">58%</span></td><td class="y">909,548 <span class="pct">77%</span></td><td>12,554</td><td>0</td></tr>
-<tr><td>512</td><td>1</td><td class="y">495,317 <span class="pct">98%</span></td><td class="g"><b>506,736</b> <span class="pct">100%</span></td><td class="r">309,655 <span class="pct">61%</span></td><td class="y">455,408 <span class="pct">90%</span></td><td>63</td><td>0</td></tr>
-<tr><td>512</td><td>2</td><td class="y">518,223 <span class="pct">95%</span></td><td class="g"><b>547,085</b> <span class="pct">100%</span></td><td class="r">354,945 <span class="pct">65%</span></td><td class="y">506,904 <span class="pct">93%</span></td><td>311</td><td>0</td></tr>
-<tr><td>512</td><td>8</td><td class="g"><b>877,585</b> <span class="pct">100%</span></td><td class="y">872,173 <span class="pct">99%</span></td><td class="r">399,137 <span class="pct">45%</span></td><td class="y">543,304 <span class="pct">62%</span></td><td>1,567</td><td>0</td></tr>
-<tr><td>512</td><td>16</td><td class="g"><b>1,072,583</b> <span class="pct">100%</span></td><td class="y">1,050,217 <span class="pct">98%</span></td><td class="r">507,338 <span class="pct">47%</span></td><td class="y">633,767 <span class="pct">59%</span></td><td>2,731</td><td>0</td></tr>
-<tr><td>512</td><td>32</td><td class="y">1,017,331 <span class="pct">96%</span></td><td class="g"><b>1,061,738</b> <span class="pct">100%</span></td><td class="r">574,446 <span class="pct">54%</span></td><td class="y">674,357 <span class="pct">64%</span></td><td>5,733</td><td>0</td></tr>
-<tr><td>512</td><td>64</td><td class="y">794,429 <span class="pct">79%</span></td><td class="g"><b>1,005,488</b> <span class="pct">100%</span></td><td class="r">612,756 <span class="pct">61%</span></td><td class="y">846,605 <span class="pct">84%</span></td><td>14,753</td><td>0</td></tr>
-</table>
+<dl class="legend">
+<dt>req/s</dt><dd>completed responses per second. This is the only table where the four clients are
+directly comparable, so it is the only one rank-coloured green-to-red across the row</dd>
+<dt>failed requests</dt><dd>requests the client gave up on. Against h3x in shared-socket mode these
+are the 4-tuple churn described under "Why h3x drops requests"; the connection dies, whatever was in
+flight on it fails, and the pool re-dials</dd>
+<dt>server UDP drops</dt><dd>datagrams the kernel discarded on the <em>server's</em> socket because
+its receive buffer was full, read per cell from <code>/proc/net/udp</code>. Every drop we measured
+was a receive-buffer overflow (the per-socket counter, snmp <code>RcvbufErrors</code> and snmp
+<code>InErrors</code> were exactly equal). These cost throughput, not correctness: QUIC retransmits
+them. All three servers run the stock 212992-byte buffer (<code>net.core.rmem_max</code>), so this
+column is a drain-rate difference, not a buffer-size one</dd>
+</dl>
+</details>
+<h5>throughput</h5>
+<div class="scale"><span>0%</span><div class="ramp"><i style="background:color-mix(in oklab, var(--seq-a) 0%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 6%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 13%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 32%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)"></i></div><span>100%</span><em>share of the fastest client in that row</em></div>
+<div class="scroll"><table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:22%"></colgroup><tr><th>conns</th><th>m</th><th>h3x req/s</th><th>h3x spc req/s</th><th>h2o-httpclient req/s</th><th>h2load req/s</th></tr>
+<tr><td>64</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">483,390 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">477,954<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">473,129<span class="pct">98%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 32%, transparent)">402,263<span class="pct">83%</span></td></tr>
+<tr><td>64</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">572,909 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">569,882<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">450,596<span class="pct">79%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 34%, transparent)">508,847<span class="pct">89%</span></td></tr>
+<tr><td>64</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">802,167 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">771,700<span class="pct">96%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 27%, transparent)">571,219<span class="pct">71%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 34%, transparent)">714,856<span class="pct">89%</span></td></tr>
+<tr><td>64</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">1,166,516<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,182,932 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">766,402<span class="pct">65%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 31%, transparent)">960,786<span class="pct">81%</span></td></tr>
+<tr><td>64</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">1,319,327<span class="pct">96%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,368,573 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 26%, transparent)">922,065<span class="pct">67%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 33%, transparent)">1,178,512<span class="pct">86%</span></td></tr>
+<tr><td>64</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">1,407,435<span class="pct">97%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,454,157 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">1,066,482<span class="pct">73%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 35%, transparent)">1,324,692<span class="pct">91%</span></td></tr>
+<tr><td>128</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">507,401 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 36%, transparent)">487,014<span class="pct">96%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 29%, transparent)">390,081<span class="pct">77%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 34%, transparent)">453,825<span class="pct">89%</span></td></tr>
+<tr><td>128</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">530,028 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">522,062<span class="pct">98%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">421,014<span class="pct">79%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">528,194<span class="pct">100%</span></td></tr>
+<tr><td>128</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">905,644<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">911,513 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 21%, transparent)">515,591<span class="pct">57%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">665,328<span class="pct">73%</span></td></tr>
+<tr><td>128</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,114,501 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">1,090,611<span class="pct">98%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">734,844<span class="pct">66%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 31%, transparent)">918,960<span class="pct">82%</span></td></tr>
+<tr><td>128</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">1,247,859<span class="pct">98%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,279,499 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 26%, transparent)">870,012<span class="pct">68%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 32%, transparent)">1,085,446<span class="pct">85%</span></td></tr>
+<tr><td>128</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,277,492 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,275,612<span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 29%, transparent)">960,961<span class="pct">75%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 35%, transparent)">1,185,738<span class="pct">93%</span></td></tr>
+<tr><td>256</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">516,309 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 36%, transparent)">483,391<span class="pct">94%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 27%, transparent)">360,504<span class="pct">70%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 35%, transparent)">477,820<span class="pct">93%</span></td></tr>
+<tr><td>256</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">557,771 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">546,123<span class="pct">98%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 27%, transparent)">403,095<span class="pct">72%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">537,276<span class="pct">96%</span></td></tr>
+<tr><td>256</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">922,139<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">927,344 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)">473,093<span class="pct">51%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 24%, transparent)">595,780<span class="pct">64%</span></td></tr>
+<tr><td>256</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">1,064,595<span class="pct">98%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,086,774 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 23%, transparent)">648,540<span class="pct">60%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 29%, transparent)">837,037<span class="pct">77%</span></td></tr>
+<tr><td>256</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">1,108,328<span class="pct">97%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,138,650 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 23%, transparent)">691,711<span class="pct">61%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 30%, transparent)">907,238<span class="pct">80%</span></td></tr>
+<tr><td>256</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,104,288 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">1,096,288<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 24%, transparent)">691,172<span class="pct">63%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 31%, transparent)">887,886<span class="pct">80%</span></td></tr>
+<tr><td>512</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">502,341 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 36%, transparent)">482,054<span class="pct">96%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 24%, transparent)">312,776<span class="pct">62%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 35%, transparent)">465,312<span class="pct">93%</span></td></tr>
+<tr><td>512</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">496,325<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">498,923 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">361,232<span class="pct">72%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">495,119<span class="pct">99%</span></td></tr>
+<tr><td>512</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-a) 36%, transparent)">763,738<span class="pct">94%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">814,546 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 19%, transparent)">405,947<span class="pct">50%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">530,553<span class="pct">65%</span></td></tr>
+<tr><td>512</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">972,437 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 37%, transparent)">958,799<span class="pct">99%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 20%, transparent)">506,697<span class="pct">52%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 25%, transparent)">632,387<span class="pct">65%</span></td></tr>
+<tr><td>512</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-a) 33%, transparent)">869,587<span class="pct">88%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">993,699 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 22%, transparent)">570,643<span class="pct">57%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 27%, transparent)">696,436<span class="pct">70%</span></td></tr>
+<tr><td>512</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-a) 28%, transparent)">709,002<span class="pct">74%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 38%, transparent)">962,962 <span class="win" aria-label="fastest">&#9679;</span><span class="pct">100%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 24%, transparent)">604,427<span class="pct">63%</span></td><td style="background:color-mix(in oklab, var(--seq-a) 33%, transparent)">826,525<span class="pct">86%</span></td></tr>
+</table></div>
+<h5>failed requests <span class="sub">summed over m</span></h5>
+<div class="scale"><span>0</span><div class="ramp"><i style="background:color-mix(in oklab, var(--seq-b) 0%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)"></i></div><span>max</span><em>log scale; untinted means zero</em></div>
+<div class="scroll"><table><colgroup><col style="width:7%"><col style="width:9%"><col span="4" style="width:21%"></colgroup><tr><th>conns</th><th>per socket</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td class="sub2">2</td><td style="background:color-mix(in oklab, var(--seq-b) 23%, transparent)">497</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 9%, transparent)">12</td><td class="zero">0</td></tr>
+<tr><td>128</td><td class="sub2">4</td><td style="background:color-mix(in oklab, var(--seq-b) 32%, transparent)">5,410</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 11%, transparent)">21</td><td class="zero">0</td></tr>
+<tr><td>256</td><td class="sub2">8</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">15,636</td><td style="background:color-mix(in oklab, var(--seq-b) 16%, transparent)">72</td><td style="background:color-mix(in oklab, var(--seq-b) 15%, transparent)">54</td><td class="zero">0</td></tr>
+<tr><td>512</td><td class="sub2">16</td><td style="background:color-mix(in oklab, var(--seq-b) 38%, transparent)">31,829</td><td style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)">1,832</td><td style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)">44</td><td class="zero">0</td></tr></table></div>
+<details><summary>per-cell breakdown, all 24 cells</summary>
+<div class="scroll"><table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:22%"></colgroup><tr><th>conns</th><th>m</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-b) 10%, transparent)">8</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 10%, transparent)">9</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 17%, transparent)">48</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)">4</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 23%, transparent)">192</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 3%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 17%, transparent)">48</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 23%, transparent)">192</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 3%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-b) 12%, transparent)">15</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 20%, transparent)">91</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 8%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 24%, transparent)">253</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 8%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 29%, transparent)">740</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 31%, transparent)">1,262</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 5%, transparent)">2</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">3,049</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 3%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-b) 20%, transparent)">91</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 5%, transparent)">2</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 23%, transparent)">197</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 8%, transparent)">6</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 27%, transparent)">514</td><td style="background:color-mix(in oklab, var(--seq-b) 19%, transparent)">72</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 29%, transparent)">767</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 6%, transparent)">3</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 36%, transparent)">3,758</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 16%, transparent)">36</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 40%, transparent)">10,309</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)">4</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>1</td><td style="background:color-mix(in oklab, var(--seq-b) 23%, transparent)">204</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 3%, transparent)">1</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>2</td><td style="background:color-mix(in oklab, var(--seq-b) 24%, transparent)">250</td><td style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)">136</td><td style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)">4</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>8</td><td style="background:color-mix(in oklab, var(--seq-b) 32%, transparent)">1,603</td><td style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)">136</td><td style="background:color-mix(in oklab, var(--seq-b) 12%, transparent)">13</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>16</td><td style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)">2,977</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 13%, transparent)">18</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>32</td><td style="background:color-mix(in oklab, var(--seq-b) 41%, transparent)">11,460</td><td style="background:color-mix(in oklab, var(--seq-b) 27%, transparent)">530</td><td style="background:color-mix(in oklab, var(--seq-b) 5%, transparent)">2</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>64</td><td style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)">15,335</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">1,030</td><td style="background:color-mix(in oklab, var(--seq-b) 8%, transparent)">6</td><td class="zero">0</td></tr>
+</table></div></details>
+<h5>server UDP datagrams dropped <span class="sub">receive-buffer overflow, summed over m</span></h5>
+<div class="scale"><span>0</span><div class="ramp"><i style="background:color-mix(in oklab, var(--seq-b) 0%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 7%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 14%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 21%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 28%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 35%, transparent)"></i><i style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)"></i></div><span>max</span><em>log scale; untinted means zero</em></div>
+<div class="scroll"><table><colgroup><col style="width:7%"><col style="width:9%"><col span="4" style="width:21%"></colgroup><tr><th>conns</th><th>per socket</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td class="sub2">2</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td class="sub2">4</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td class="sub2">8</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>512</td><td class="sub2">16</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 11%, transparent)">3</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 30%, transparent)">43</td></tr></table></div>
+<details><summary>per-cell breakdown, all 24 cells</summary>
+<div class="scroll"><table>
+<colgroup><col style="width:7%"><col style="width:5%"><col span="4" style="width:22%"></colgroup><tr><th>conns</th><th>m</th><th>h3x</th><th>h3x spc</th><th>h2o-httpclient</th><th>h2load</th></tr>
+<tr><td>64</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>64</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>128</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>8</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>256</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>1</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>2</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 42%, transparent)">31</td></tr>
+<tr><td>512</td><td>8</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 17%, transparent)">3</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>16</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td style="background:color-mix(in oklab, var(--seq-b) 31%, transparent)">12</td></tr>
+<tr><td>512</td><td>32</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+<tr><td>512</td><td>64</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td><td class="zero">0</td></tr>
+</table></div></details>
 <details><summary>Methodology &amp; caveats</summary>
-<p>h2load dropped 0 requests in all 72 cells. The h2load collapse at m=1-2 happens only against h2o
-(7k-54k req/s there vs 480k-820k against nginx and 410k-540k against haproxy): a pairing-specific
-interaction between ngtcp2 and the quicly server at low concurrency, not general client behavior.
-Against nginx the picture inverts for h3x: no GSO-batched responses means its GRO cannot engage,
-quicly pays full per-packet receive cost, and h2load leads 22 of 24 cells. Against haproxy the h3x
-family leads all 24. h2o-httpclient error lines were negligible
-(2-7 per cell, process-teardown artifacts) in every cell against nginx and up to 256 conns against
-h2o and haproxy; real volumes appeared only at 512 conns against h2o (516 at m=2, 2,051 at m=8,
-8,200 at m=32, 16,387 at m=64, uncharacterized by type) and mildly against haproxy (35-195). The
-spc column: zero drops in all 72 cells, on every server. Its throughput cost vs shared-socket mode
-is largest against h2o (4.6-29.6%, worst at 128 conns; the shared model's home ground is one socket
-to poll and batched sends) and a wash against haproxy (-10.5% to +26.6%, mean +0.1%). Single
-unpinned runs: differences under ~1.5x are within run-to-run noise.</p>
-<p><b>Mixed measurement dates.</b> The h3x and spc columns are from 2026-07-29; h2load and
-h2o-httpclient are from 2026-07-19 and were not re-run, since neither client changed and re-running
-would only add noise. Same box, same servers, same 1 KB object, but not the same sitting, so
-cross-column gaps carry a little more uncertainty than within-column ones. The 2026-07-29 grid was
-itself interrupted by a hard reset partway through the nginx spc table, so that one table spans a
-reboot: conns 64-128 and 256/m&le;16 predate it, the rest follow.</p>
+<p>h2load failed 0 requests in all 72 cells, on every server. Its collapse at m=1-2 happens only
+against h2o (5k-14k req/s there, recovering to 3.39M by m=64): a pairing-specific interaction
+between ngtcp2 and the quicly server at low concurrency, not general client behaviour. Against nginx
+the picture inverts for h3x: no GSO-batched responses means its GRO cannot engage, quicly pays full
+per-packet receive cost, and h2load leads 22 of 24 cells. Against haproxy the h3x family leads all
+24 and both rivals win nothing. h2o-httpclient's failures stay negligible throughout (134, 51 and
+131 over the three grids, process-teardown artifacts). The spc column costs +16.1% mean against h2o
+and +25.0% against nginx, and gains 1.9% against haproxy, where shared-socket mode is bleeding
+requests in the first place.</p>
+<p><b>All 288 cells are one sitting</b> (2026-07-29, bench/grid-v3.sh), same box, same servers, same
+1 KB object, so columns are directly comparable. Every cell re-derives the served object size from
+the client's own byte counters and the page refuses to build if any cell disagrees with the 1 KB
+file, because an earlier round of sweeps was silently invalidated by benchmarking a 20 KB object
+against 1 KB tables.</p>
+<p><b>Single unpinned runs.</b> One 10 s run per cell, no repeats. A control experiment across two
+grids, comparing cells whose configuration was byte-identical, saw swings from -17.6% to +13.5% with
+no consistent sign. So differences under roughly 20% here are not distinguishable from run-to-run
+variance, and only the large effects (the drop counts, the m=1-2 h2load collapse, the nginx
+inversion) should be read as real. Separating anything smaller needs repeated samples per cell.</p>
 </details>
 <details><summary>Why h3x (shared-socket mode) drops requests</summary>
 <p>The trigger is multiplexing many QUIC connections over one UDP socket per worker. Differential
 tests against haproxy: one connection per socket is flawless (32 conns / 32 sockets: 7.19M requests,
 0 drops, 0 re-dials; thread-count controlled separately with 4 conns / 4 sockets, also 0/0), while
 8 connections per socket, same 32 connections and same multiplexing, drops 1,428 and re-dials
-constantly (355k requests on resumed connections in 5 s, with no reconnect flag). Confirmed at scale
-by the h2o-httpclient grids and the spc column. Servers differ in how they tolerate multiple QUIC
+constantly (355k requests on resumed connections in 5 s, with no reconnect flag). Confirmed at scale by the spc column, which fails 0 requests against nginx and 1,904 against
+haproxy versus shared-socket h3x's 3,914 and 53,372. Servers differ in how they tolerate multiple QUIC
 connections sharing a 4-tuple: h2o accepts it (this is h2o's own client architecture), nginx churns
 moderately, haproxy constantly. Every drop surfaces as "I/O error" at stream attach: a shared-socket
 connection dies, whatever was in flight on it fails, the pool re-dials with the cached ticket, and
@@ -322,26 +658,30 @@ per connection, the h2load model), the spc column.</p>
 per connection (m, the multiplexing depth). h3x is built for a few fat, heavily multiplexed
 connections; h2load for many thin ones.</p>
 <dl class="legend">
-<dt>h3x's home ground</dt><dd>few connections, high m. Its matrix peak is 3.79M req/s at 64
-connections x 64 streams against h2o, 2.3x h2o's own reference client in that cell</dd>
-<dt>h2load's home ground</dt><dd>many thin connections, and low m generally. It takes nearly every
-nginx cell, and the m=64 column against h2o at 128+ connections. It no longer wins anywhere against
-haproxy</dd>
+<dt>h3x's home ground</dt><dd>few connections, high m. Its matrix peak is 3.54M req/s at 64
+connections x 64 streams against h2o, 1.9x h2o's own reference client in that cell</dd>
+<dt>h2load's home ground</dt><dd>many thin connections, and low m generally. It takes 22 of 24 nginx
+cells and wins nothing at all against haproxy</dd>
 <dt>vs h2o</dt><dd>h2o GSO-batches its responses, so h3x's UDP GRO engages and its receive path
-keeps up; h3x takes 18 of 24 cells. It gives up exactly six, all at 128+ connections: the m=2 cells
-to the reference client (by 2-9%) and the m=64 cells to h2load (by 6-13%). At m=1-2 h2load nearly stops
-(7k-54k req/s) from a ngtcp2-x-quicly low-concurrency stall specific to that pairing</dd>
+keeps up; h3x takes 21 of 24 cells. At m=1-2 h2load nearly stops (5k-14k req/s) from a
+ngtcp2-x-quicly low-concurrency stall specific to that pairing, recovering to 3.39M by m=64</dd>
 <dt>vs nginx</dt><dd>nginx does not GSO-batch, so GRO cannot engage and quicly pays full per-packet
-receive cost; the ranking inverts and h2load leads 22 of 24 cells, by up to 1.85x</dd>
-<dt>vs haproxy</dt><dd>haproxy GSO-batches, and here h3x leads every cell: the h3x family beats
-h2load in all 24, by 1.06x to 1.69x (mean 1.27x). The two socket modes split it evenly, 12 cells
-each</dd>
-<dt>reliability</dt><dd>default h3x drops requests against nginx (5,988 over the grid) and haproxy
-(45,848, every cell), the shared-socket 4-tuple churn; see "Why h3x drops requests".
-<code>--socket-per-conn</code> removes them completely: 0 drops in all 72 cells across all three
-servers. The throughput cost is largest against h2o (5-30%) and roughly nil against haproxy</dd>
-<dt>server capability</dt><dd>best-client peak per server: h2o 3.79M (h3x) &gt; nginx 1.65M
-(h2load) &gt; haproxy 1.51M (h3x spc) req/s</dd>
+receive cost; the ranking inverts and h2load leads 22 of 24 cells</dd>
+<dt>vs haproxy</dt><dd>haproxy GSO-batches, and here the h3x family takes every cell: h2load and the
+reference client win none. The two socket modes split it evenly, 12 cells each</dd>
+<dt>failed requests</dt><dd>shared-socket h3x fails requests against haproxy (53,372 over the grid)
+and nginx (3,914); h2load fails none anywhere. This is the 4-tuple churn described under "Why h3x
+drops requests", and it scales sharply with connections per socket: against haproxy, 8.6 failures
+per million at 2 connections per socket rising to 737.9 at 16. <code>--socket-per-conn</code>
+removes it against nginx entirely and all but eliminates it against haproxy (1,904, versus 53,372),
+at a throughput cost of +16.1% against h2o and +25.0% against nginx but -1.9% against haproxy</dd>
+<dt>UDP drops are a separate axis</dt><dd>and it runs the other way. h2o and nginx discard large
+numbers of datagrams to receive-buffer overflow while failing zero requests; haproxy discards
+essentially none while failing the most. The client matters more than the server here: h2load causes
+7.5 server drops per million requests against h2o where h3x causes 951.5, and 160.4 against nginx
+where h3x causes 11,242.4</dd>
+<dt>server capability</dt><dd>best-client peak per server: h2o 3.54M (h3x) &gt; nginx 1.73M
+(h2load) &gt; haproxy 1.45M (h3x spc) req/s</dd>
 </dl>
 </section>
 <section class="panel" id="pan-layout">
@@ -394,19 +734,18 @@ docker start nginx-h3 haproxy-h3        # :14434 / :14435
 # worker target ((512/32) x 8 / 2 = 64)
 build/h3x -k -t 32 --connections 512 -m 8 -d 10 --send-batch 64 https://127.0.0.1:14433/
 
-# the h3x and spc columns: sweeps all three servers, writes bench/matrix-v2*.log. Resumable -
-# re-running it appends only the cells a log is missing and leaves finished grids alone.
-bash bench/matrix-v2.sh
+# the whole grid on this page: all four clients x three servers x 24 cells, with per-cell UDP
+# drop accounting. Resumable - re-running appends only the cells a log is missing and leaves
+# finished grids alone. Writes bench/matrix-v3-<server>.log. Takes about 75 minutes.
+bash bench/grid-v3.sh
 
-# the other two columns (unchanged since 2026-07-19; only re-run if a client changes)
-bash bench/matrix.sh              # h3x v1 + h2load
-bash bench/matrix-spc.sh          # h3x v1 --socket-per-conn
-bash bench/matrix-httpclient.sh   # h2o's reference httpclient
+# a subset, for one cell or one column
+CONNS=512 MS=64 bash bench/grid-v3.sh
 
 python3 bench/gen-results.py      # rebuilds this page from the logs</code></pre>
 <p>Every client here served the same 1 KB <code>bench/doc_root/index.html</code>. Each table cell is
-one 10 s run; the raw per-run logs are the <code>bench/matrix*.log</code> files the page is built
-from.</p>
+one 10 s run; the raw per-run logs are the <code>bench/matrix-v3-*.log</code> files the page is
+built from, one per server with all four client tags interleaved.</p>
 </section>
 </main>
 </div>
