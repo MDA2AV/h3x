@@ -28,8 +28,36 @@ D=${D:-10} T=${T:-32} COOL=${COOL:-5}
 # the full-grid count regardless, so a partial run can never write a premature ALL DONE.
 CONNS=${CONNS:-"64 128 256 512"}
 MS=${MS:-"1 2 8 16 32 64"}
-OBJ=$(stat -c%s bench/doc_root/index.html)
 CELLS=96  # 4 clients x 4 conns x 6 m, per server
+
+# PAYLOAD picks the object. Each size lives at its own URL rather than being swapped into one file,
+# so the request itself names the payload: a run cannot quietly measure the wrong object, which is
+# how a previous round of sweeps was invalidated (a 20 KB object recorded against 1 KB tables).
+# haproxy needs a matching `http-request return ... if { path ... }` rule per payload in haproxy.conf,
+# since unlike h2o and nginx it does not resolve paths against doc_root itself.
+PAYLOAD=${PAYLOAD:-1k}
+case "$PAYLOAD" in
+    1k)   REQPATH="/";           OBJFILE=bench/doc_root/index.html ;;
+    20k)  REQPATH="/20k.html";   OBJFILE=bench/doc_root/20k.html ;;
+    128k) REQPATH="/128k.html";  OBJFILE=bench/doc_root/128k.html ;;
+    *) echo "unknown PAYLOAD=$PAYLOAD (want 1k, 20k or 128k)" >&2; exit 1 ;;
+esac
+# bench/doc_root is gitignored, so generate the payload rather than requiring it to be checked in:
+# a clone can reproduce the grid without shipping a 128 KB fixture. Deterministic and exact-sized.
+if [ ! -f "$OBJFILE" ]; then
+    case "$PAYLOAD" in 20k) WANT=20480 ;; 128k) WANT=131072 ;; *) WANT=1024 ;; esac
+    mkdir -p bench/doc_root
+    python3 - "$OBJFILE" "$WANT" <<'PYGEN'
+import sys
+path, size = sys.argv[1], int(sys.argv[2])
+head = f'<!doctype html><title>{size}B</title><p>h3x benchmark payload, {size} bytes exactly.</p>\n'
+body = head + "<!-- " + "x" * (size - len(head) - len("<!--  -->\n")) + " -->\n"
+assert len(body) == size, (len(body), size)
+open(path, "w").write(body)
+PYGEN
+    echo "generated $OBJFILE ($WANT B)" >&2
+fi
+OBJ=$(stat -c%s "$OBJFILE")
 HC=build/deps/h2o/h2o-httpclient
 ulimit -n 65536 2>/dev/null || true
 
@@ -43,8 +71,13 @@ trap 'rm -rf "$TMP"' EXIT
 # Derive the served object size from MB/s and req/s. The 2026-07 sweeps were invalidated by silently
 # benchmarking a 20 KB object against 1 KB tables, so every cell that reports bytes re-checks it.
 objcheck() { # bytes -> "objbytes=N ok" | "objbytes=N OBJSIZE_MISMATCH"
-    local bytes=${1:-0}
-    if [ "$bytes" -lt $((OBJ - 40)) ] || [ "$bytes" -gt $((OBJ + 40)) ]; then
+    # 10%, floored at 40B. The guard is for contamination (the smallest possible mix-up here is 20x
+    # off), not for the few percent of drift that cells with a heavy in-flight tail at the cutoff show
+    # in both directions. gen-results.py re-derives this from the recorded objbytes and reports
+    # 2-10% separately as drift, so nothing is hidden by the looser flag.
+    local bytes=${1:-0} tol=$((OBJ / 10))
+    [ "$tol" -lt 40 ] && tol=40
+    if [ "$bytes" -lt $((OBJ - tol)) ] || [ "$bytes" -gt $((OBJ + tol)) ]; then
         echo "objbytes=$bytes OBJSIZE_MISMATCH"
     else
         echo "objbytes=$bytes ok"
@@ -129,7 +162,7 @@ grid() { # logfile
         tr -d '\000' < "$log" > "$log.tmp" && mv "$log.tmp" "$log"
     else
         {
-            echo "GRID-V3 START $(date +%F' '%T) obj=${OBJ}B server=$NAME url=$URL t=$T d=$D unpinned"
+            echo "GRID-V3 START $(date +%F' '%T) payload=$PAYLOAD obj=${OBJ}B server=$NAME url=$URL t=$T d=$D unpinned"
             echo "# h3x send-batch = half the worker target ((conns/threads) x m / 2), clamp removed"
             echo "# srvdrops = server socket rcvbuf overflow on $PORT; clidrops = global RcvbufErrors minus that"
         } >> "$log"
@@ -159,17 +192,17 @@ grid() { # logfile
 }
 
 for entry in "h2o 14433" "nginx 14434" "haproxy 14435"; do
-    set -- $entry; NAME=$1; PORT=$2; URL="https://127.0.0.1:$PORT/"
-    LOG="bench/matrix-v3-$NAME.log"
+    set -- $entry; NAME=$1; PORT=$2; URL="https://127.0.0.1:$PORT$REQPATH"
+    LOG="bench/matrix-v3-$NAME-$PAYLOAD.log"
     if [ "$(logged "$LOG")" -eq "$CELLS" ]; then
-        echo "DONE $NAME: grid already complete" >&2
+        echo "DONE $NAME $PAYLOAD: grid already complete" >&2
         continue
     fi
     if ! timeout 5 build/h3x -k -n 1 -t 1 --connections 1 "$URL" >/dev/null 2>&1; then
         echo "SKIP $NAME ($URL): not reachable" >&2
         continue
     fi
-    echo "=== $NAME ($URL) ===" >&2
+    echo "=== $NAME $PAYLOAD ($URL) ===" >&2
     grid "$LOG"
 done
-echo "GRID COMPLETE $(date +%F' '%T)" >&2
+echo "GRID COMPLETE $PAYLOAD $(date +%F' '%T)" >&2

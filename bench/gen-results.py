@@ -10,13 +10,30 @@ SERVERS = [("h2o", "vs h2o (quicly, GRO patch, 12 threads, native)"),
 # bench/grid-v3.sh. Earlier revisions of this page mixed a 2026-07-29 h3x column with 2026-07-19
 # h2load and httpclient columns; v3 exists so every column is comparable, and so every cell records
 # UDP-level drops alongside request-level failures.
-LOGS = {srv: f"matrix-v3-{srv}.log" for srv in ("h2o", "nginx", "haproxy")}
+SRVS = ["h2o", "nginx", "haproxy"]
+PAYLOADS = ["1k", "20k", "128k"]
+PLABEL = {"1k": "1 KB", "20k": "20 KB", "128k": "128 KB"}
+# Keyed by (payload, server). Object size is a first-class axis: the whole point of running three of
+# them is that the ranking is not stable across payload size, so the page must never present one
+# size's table as "the" result.
+LOGS = {(p, s): f"matrix-v3-{s}-{p}.log" for p in PAYLOADS for s in SRVS}
 TAGS = {"h3x": "h3x", "spc": "h3x-spc", "hc": "httpclient", "h2load": "h2load"}
 CELLS = [(c, m) for c in (64, 128, 256, 512) for m in (1, 2, 8, 16, 32, 64)]
 COLS = ["h3x", "spc", "hc", "h2load"]  # display order
 LABEL = {"h3x": "h3x", "spc": "h3x spc", "hc": "h2o-httpclient", "h2load": "h2load"}
 
 HEAD = re.compile(r"^RESULT (\S+) conns=(\d+) m=(\d+) (\d+) (\d+) ")
+EXPECT = {"1k": 1024, "20k": 20480, "128k": 131072}
+# The object-size guard exists because a 20 KB object was once silently measured against 1 KB tables,
+# so it must stay fatal for a real mix-up: the smallest possible one here is 20x off. But 2% is far
+# too tight at the extremes. Cells with a heavy in-flight tail at the 10 s cutoff drift a few percent
+# in both directions -- bytes from partial bodies count toward throughput while their requests count
+# as failed, inflating bytes-per-completed (measured +2.3 to +3.5% on nginx cells failing 11-23%),
+# and h2load's 2xx count includes responses whose bodies had not finished, deflating it (-2.4% on the
+# 512x64 haproxy cell, where 32,768 streams were in flight at cutoff). Those are accounting artifacts
+# of the measurement window, not wrong payloads. So: drift is recorded and reported, contamination is
+# still fatal. Policy lives here rather than in the log, so the log keeps the raw measurement.
+DRIFT, FATAL = 0.02, 0.10
 
 def parse(path):
     """-> {(tag, conns, m): record}. Trailing fields are key=value, so new ones stay backward safe."""
@@ -39,7 +56,7 @@ def parse(path):
                 # not be silently rendered as a clean zero.
                 "srvdrops": int(kv.get("srvdrops", -1)),
                 "clidrops": int(kv.get("clidrops", -1)),
-                "mismatch": "OBJSIZE_MISMATCH" in line,
+                "objbytes": kv.get("objbytes", "n/a"),
             }
     return out
 
@@ -55,15 +72,27 @@ data = {srv: {cli: {(c, m): raw[srv][(TAGS[cli], c, m)]
 missing = [(srv, cli, c, m) for srv in LOGS for cli in COLS for c, m in CELLS
            if (c, m) not in data[srv][cli]]
 if missing:
+    want = ",".join(sorted({key[0] for key, _, _, _ in missing}))  # which payloads are short
     raise SystemExit(f"incomplete grid: {len(missing)} of {len(LOGS) * len(COLS) * len(CELLS)} "
                      f"cells missing, e.g. {missing[:4]}\n"
-                     f"run bench/grid-v3.sh first (it resumes where it stopped)")
-mismatched = [(srv, cli, c, m) for srv in LOGS for cli in COLS for c, m in CELLS
-              if data[srv][cli][(c, m)]["mismatch"]]
-if mismatched:
-    raise SystemExit(f"{len(mismatched)} cells flagged OBJSIZE_MISMATCH, e.g. {mismatched[:4]}\n"
-                     f"the served object was not {os.path.basename(B)}/doc_root/index.html; "
-                     f"do not publish these numbers")
+                     f"missing payloads: {want}; run PAYLOAD=<size> bash bench/grid-v3.sh "
+                     f"for each (it resumes where it stopped)")
+def objdev(key, cli, cell):
+    """Relative deviation of the measured object size from the payload this grid claims to serve."""
+    ob = data[key][cli][cell]["objbytes"]
+    if ob == "n/a":
+        return None  # h2o-httpclient reports no byte counters at all
+    return int(ob) / EXPECT[key[0]] - 1
+
+bad = [(k, c, cell, objdev(k, c, cell)) for k in LOGS for c in COLS for cell in CELLS
+       if (objdev(k, c, cell) or 0) and abs(objdev(k, c, cell)) > FATAL]
+if bad:
+    raise SystemExit(f"{len(bad)} cells served the wrong object, e.g. "
+                     + "; ".join(f"{k[1]}/{k[0]} {c} {cell} off by {d * 100:+.0f}%"
+                                 for k, c, cell, d in bad[:4])
+                     + "\ndo not publish these numbers")
+drift = [(k, c, cell, objdev(k, c, cell)) for k in LOGS for c in COLS for cell in CELLS
+         if (objdev(k, c, cell) or 0) and DRIFT < abs(objdev(k, c, cell)) <= FATAL]
 
 def num(v):
     return f"{v:,}" if v >= 0 else "?"
@@ -227,10 +256,12 @@ column is a drain-rate difference, not a buffer-size one</dd>
 </dl>"""
 
 def bench_panel(srv):
-    # Tiles first (the answer), then the three tables (the evidence), then the caveats, collapsed.
+    # srv is the (payload, server) key. Tiles first (the answer), then the tables (the evidence),
+    # then the caveats, collapsed.
     fail_hi = max(data[srv][c][k]["fail"] for c in COLS for k in CELLS)
     drop_hi = max(data[srv][c][k]["srvdrops"] for c in COLS for k in CELLS)
-    return (f'<h4>{TITLES[srv]}</h4>\n{tiles(srv)}\n'
+    return (f'<h4>{TITLES[srv[1]]} '
+            f'<span class="obj">{PLABEL[srv[0]]} object</span></h4>\n{tiles(srv)}\n'
             f'<details class="key"><summary>What the four clients are, and what each table '
             f'measures</summary>\n{CLIENTS}\n{MEASURES}\n</details>\n'
             f'<h5>throughput</h5>\n'
@@ -283,34 +314,46 @@ only the shared-nothing worker threads, the closed-loop concurrency driver, conn
 in-memory 0-RTT resumption, the request-file parser, and merged latency stats.</p>"""
 
 DOC_FINDINGS = """<h4>Key findings</h4>
-<p>The workload regime, not the client, decides the winner. Two axes: connection count and streams
-per connection (m, the multiplexing depth). h3x is built for a few fat, heavily multiplexed
-connections; h2load for many thin ones.</p>
+<p><b>Object size decides the winner, more than the server does.</b> Every conclusion below was
+different when only the 1 KB grid existed. h3x leads 21 of 24 cells against h2o at 1 KB; at 128 KB
+h2load takes nginx and haproxy 24-0 and h2o 15-9. Read any single payload on its own and you will
+draw the wrong conclusion.</p>
+<table><colgroup><col style="width:16%"><col span="9" style="width:9.3%"></colgroup>
+<tr><th>cells won</th><th colspan="3">h2o</th><th colspan="3">nginx</th><th colspan="3">haproxy</th></tr>
+<tr><th></th><th>1 KB</th><th>20 KB</th><th>128 KB</th><th>1 KB</th><th>20 KB</th><th>128 KB</th>
+<th>1 KB</th><th>20 KB</th><th>128 KB</th></tr>
+<tr><td>h3x</td><td>21</td><td>16</td><td>9</td><td>2</td><td>0</td><td>0</td><td>12</td><td>2</td><td>0</td></tr>
+<tr><td>h3x spc</td><td>1</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td><td>12</td><td>9</td><td>0</td></tr>
+<tr><td>h2o-httpclient</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+<tr><td>h2load</td><td>1</td><td>7</td><td>15</td><td>22</td><td>24</td><td>24</td><td>0</td><td>13</td><td>24</td></tr>
+</table>
 <dl class="legend">
-<dt>h3x's home ground</dt><dd>few connections, high m. Its matrix peak is 3.54M req/s at 64
-connections x 64 streams against h2o, 1.9x h2o's own reference client in that cell</dd>
-<dt>h2load's home ground</dt><dd>many thin connections, and low m generally. It takes 22 of 24 nginx
-cells and wins nothing at all against haproxy</dd>
-<dt>vs h2o</dt><dd>h2o GSO-batches its responses, so h3x's UDP GRO engages and its receive path
-keeps up; h3x takes 21 of 24 cells. At m=1-2 h2load nearly stops (5k-14k req/s) from a
-ngtcp2-x-quicly low-concurrency stall specific to that pairing, recovering to 3.39M by m=64</dd>
-<dt>vs nginx</dt><dd>nginx does not GSO-batch, so GRO cannot engage and quicly pays full per-packet
-receive cost; the ranking inverts and h2load leads 22 of 24 cells</dd>
-<dt>vs haproxy</dt><dd>haproxy GSO-batches, and here the h3x family takes every cell: h2load and the
-reference client win none. The two socket modes split it evenly, 12 cells each</dd>
-<dt>failed requests</dt><dd>shared-socket h3x fails requests against haproxy (53,372 over the grid)
-and nginx (3,914); h2load fails none anywhere. This is the 4-tuple churn described under "Why h3x
-drops requests", and it scales sharply with connections per socket: against haproxy, 8.6 failures
-per million at 2 connections per socket rising to 737.9 at 16. <code>--socket-per-conn</code>
-removes it against nginx entirely and all but eliminates it against haproxy (1,904, versus 53,372),
-at a throughput cost of +16.1% against h2o and +25.0% against nginx but -1.9% against haproxy</dd>
-<dt>UDP drops are a separate axis</dt><dd>and it runs the other way. h2o and nginx discard large
-numbers of datagrams to receive-buffer overflow while failing zero requests; haproxy discards
-essentially none while failing the most. The client matters more than the server here: h2load causes
-7.5 server drops per million requests against h2o where h3x causes 951.5, and 160.4 against nginx
-where h3x causes 11,242.4</dd>
-<dt>server capability</dt><dd>best-client peak per server: h2o 3.54M (h3x) &gt; nginx 1.73M
-(h2load) &gt; haproxy 1.45M (h3x spc) req/s</dd>
+<dt>h3x's home ground</dt><dd>small objects, few connections, high m. Its best result anywhere is
+3.54M req/s at 1 KB, 64 connections, m=64 against h2o, 1.9x h2o's own reference client in that
+cell</dd>
+<dt>why it does not survive scale-up</dt><dd>h3x's advantage comes from packing many small requests
+into one QUIC packet (see <code>--send-batch</code>). At 1 KB a batch of requests shares a datagram;
+at 128 KB a single response spans roughly 110 datagrams and there is nothing left to pack. The
+machinery that wins the 1 KB grid has no purchase on the 128 KB one</dd>
+<dt>h2load's home ground</dt><dd>everything else. It wins 22 of 24 nginx cells even at 1 KB, and by
+128 KB it wins every cell on nginx and haproxy. Its margin on nginx at 128 KB is the largest in the
+whole matrix: 144,525 req/s against h3x's 31,178, a factor of 4.6</dd>
+<dt>the one h2load weakness</dt><dd>a ngtcp2-x-quicly low-concurrency stall specific to the h2o
+pairing, and only at 1 KB: 5,151 req/s at m=1 where h3x does 878,718. It recovers to 3.39M by m=64,
+and the stall does not appear at 20 KB or 128 KB</dd>
+<dt>reliability</dt><dd><b>h2load failed 0 requests in all nine grids</b> — 216 cells, every server,
+every payload. Nothing else on this page can say that. h3x's failures grow with payload against h2o
+(0 to 15,552 to 17,774) and nginx (3,914 to 8,360 to 69,752), and shrink against haproxy (53,372 to
+23,392 to 16,459). <code>--socket-per-conn</code> cuts them hard everywhere but no longer to zero:
+31,592 against nginx at 128 KB</dd>
+<dt>UDP drops are a separate axis and rank servers, not clients</dt><dd>haproxy discards essentially
+nothing at any payload (0, 0, 0 for h3x across the three sizes) while failing the most requests. h2o
+and nginx discard millions while failing far fewer. On nginx, h2load causes an order of magnitude
+fewer server drops than h3x at every size (45,616 / 1.1M / 3.6M against 2.4M / 22.7M / 48.4M); on
+h2o that advantage inverts above 1 KB</dd>
+<dt>server capability</dt><dd>best-client peak: at 1 KB h2o 3.54M &gt; nginx 1.73M &gt; haproxy
+1.45M; at 128 KB nginx 144,525 &gt; h2o 93,102 &gt; haproxy 88,840 req/s. Even the server ranking
+flips with object size</dd>
 </dl>"""
 
 DOC_REPRODUCE = """<h4>Reproduce</h4>
@@ -342,25 +385,33 @@ python3 bench/gen-results.py      # rebuilds this page from the logs</code></pre
 one 10 s run; the raw per-run logs are the <code>bench/matrix-v3-*.log</code> files the page is
 built from, one per server with all four client tags interleaved.</p>"""
 
-NOTES_BODY = """<p>h2load failed 0 requests in all 72 cells, on every server. Its collapse at m=1-2 happens only
-against h2o (5k-14k req/s there, recovering to 3.39M by m=64): a pairing-specific interaction
-between ngtcp2 and the quicly server at low concurrency, not general client behaviour. Against nginx
-the picture inverts for h3x: no GSO-batched responses means its GRO cannot engage, quicly pays full
-per-packet receive cost, and h2load leads 22 of 24 cells. Against haproxy the h3x family leads all
-24 and both rivals win nothing. h2o-httpclient's failures stay negligible throughout (134, 51 and
-131 over the three grids, process-teardown artifacts). The spc column costs +16.1% mean against h2o
-and +25.0% against nginx, and gains 1.9% against haproxy, where shared-socket mode is bleeding
-requests in the first place.</p>
-<p><b>All 288 cells are one sitting</b> (2026-07-29, bench/grid-v3.sh), same box, same servers, same
-1 KB object, so columns are directly comparable. Every cell re-derives the served object size from
-the client's own byte counters and the page refuses to build if any cell disagrees with the 1 KB
-file, because an earlier round of sweeps was silently invalidated by benchmarking a 20 KB object
-against 1 KB tables.</p>
+NOTES_BODY = """<p>h2load failed 0 requests in all nine grids, on every server at every payload. Its collapse at
+m=1-2 happens only against h2o and only at 1 KB (5k-14k req/s, recovering to 3.39M by m=64): a
+pairing-specific interaction between ngtcp2 and the quicly server at low concurrency, not general
+client behaviour, and it does not reappear at the larger payloads. h2o-httpclient's failures stay
+small throughout (128-319 per grid, process-teardown artifacts) except against nginx at 128 KB
+(2,773). <code>--socket-per-conn</code> costs h3x throughput at 1 KB (+16.1% against h2o, +25.0%
+against nginx) and buys reliability everywhere; at 128 KB the two modes are within noise of each
+other on throughput and spc still fails far less.</p>
+<p><b>All 864 cells are one sitting</b> (2026-07-29, bench/grid-v3.sh), same box, same servers, so
+columns and payloads are directly comparable. Each payload is served at its own URL
+(<code>/</code>, <code>/20k.html</code>, <code>/128k.html</code>) rather than by swapping one
+file's contents, and every cell re-derives the served object size from the client's own byte
+counters. A round of earlier sweeps here was invalidated by silently benchmarking a 20 KB object
+against 1 KB tables; naming the payload in the request makes that failure structurally impossible
+rather than merely checked for.</p>
+<p><b>Four cells at 128 KB drift 2-3% from the nominal object size</b> and are reported by the
+generator rather than hidden. Three are nginx h3x cells failing 11-23% of requests, where bytes from
+partial bodies count toward throughput while their requests count as failed, inflating
+bytes-per-completed. The fourth is haproxy h2load at 512x64, where 32,768 streams were still in
+flight at the 10 s cutoff, deflating it by the same mechanism in reverse. Both are artifacts of the
+measurement window. A real payload mix-up here would be 20x off, not 3%.</p>
 <p><b>Single unpinned runs.</b> One 10 s run per cell, no repeats. A control experiment across two
 grids, comparing cells whose configuration was byte-identical, saw swings from -17.6% to +13.5% with
-no consistent sign. So differences under roughly 20% here are not distinguishable from run-to-run
-variance, and only the large effects (the drop counts, the m=1-2 h2load collapse, the nginx
-inversion) should be read as real. Separating anything smaller needs repeated samples per cell.</p>"""
+no consistent sign. So differences under roughly 20% are not distinguishable from run-to-run
+variance, and only the large effects should be read as real — which here means the payload-size
+reversal (h3x 21-1 to h2load 15-9 against h2o), the 4.6x nginx gap at 128 KB, the drop counts, and
+h2load's clean failure record. Separating anything smaller needs repeated samples per cell.</p>"""
 
 DROPS_BODY = """<p>The trigger is multiplexing many QUIC connections over one UDP socket per worker. Differential
 tests against haproxy: one connection per socket is flawless (32 conns / 32 sockets: 7.19M requests,
@@ -386,16 +437,14 @@ DETAILS = f"""<details><summary>Methodology &amp; caveats</summary>
 </details>"""
 
 # panel key -> (menu label, html); GROUPS defines sidebar sections and order (first key = default)
-PANELS = {
-    "h2o": ("h2o", bench_panel("h2o")),
-    "nginx": ("nginx", bench_panel("nginx")),
-    "haproxy": ("haproxy", bench_panel("haproxy")),
+PANELS = {f"{p}-{s}": (s, bench_panel((p, s))) for p in PAYLOADS for s in SRVS}
+PANELS.update({
     "findings": ("Key findings", DOC_FINDINGS),
     "layout": ("Source layout", DOC_LAYOUT),
     "reproduce": ("Reproduce", DOC_REPRODUCE),
-}
-GROUPS = [("Benchmarks", ["h2o", "nginx", "haproxy"]),
-          ("Docs", ["findings", "layout", "reproduce"])]
+})
+GROUPS = [(f"{PLABEL[p]} object", [f"{p}-{s}" for s in SRVS]) for p in PAYLOADS]
+GROUPS += [("Docs", ["findings", "layout", "reproduce"])]
 ORDER = [k for _, keys in GROUPS for k in keys]
 
 css_show = "\n".join(
@@ -457,6 +506,8 @@ STYLE = """  :root{
   nav.side label:hover{background:color-mix(in oklab,var(--seq-a) 8%,transparent)}
   main{flex:1;min-width:0}
   main h4{font-size:1.1rem;margin:.1rem 0 .9rem;letter-spacing:-.01em}
+  main h4 .obj{font-weight:400;color:var(--ink-muted);font-size:.86em;
+               border-left:1px solid var(--rule);margin-left:.5rem;padding-left:.6rem}
   main h5{font-size:.83rem;text-transform:uppercase;letter-spacing:.07em;
           color:var(--ink-muted);margin:1.8rem 0 .1rem;font-weight:600}
   main h5 .sub{text-transform:none;letter-spacing:0;font-weight:400;opacity:.75}
@@ -532,22 +583,22 @@ html = f"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>h3x vs h2o-httpclient vs h2load</title>
+<title>h3x vs h2o-httpclient vs h2load: HTTP/3 across three object sizes</title>
 <style>
 {STYLE}
 </style>
 </head>
 <body>
 <header>
-<h3>h3x vs h2o-httpclient vs h2load: HTTP/3, 1 KB object</h3>
+<h3>h3x vs h2o-httpclient vs h2load: HTTP/3 at 1 KB, 20 KB and 128 KB</h3>
 <p class="lede">Four HTTP/3 clients over a grid of connections x streams-per-connection, against
-three servers. Every cell records throughput, failed requests, and the datagrams the kernel dropped
-on each side, because those three point in different directions and only reading all of them gets
-the story right.</p>
+three servers, at three object sizes. Every cell records throughput, failed requests, and the
+datagrams the kernel dropped on each side. Object size turns out to decide the winner more than the
+server does, so no single payload here is <em>the</em> result.</p>
 <dl class="spec">
-<div><dt>grid</dt><dd>4 conns x 6 streams x 4 clients x 3 servers<span>288 cells, one 10 s run each</span></dd></div>
+<div><dt>grid</dt><dd>4 conns x 6 streams x 4 clients<span>x 3 servers x 3 payloads = 864 cells, one 10 s run each</span></dd></div>
 <div><dt>machine</dt><dd>i9-14900K, 32 CPUs<span>loopback, unpinned, all clients native</span></dd></div>
-<div><dt>object</dt><dd>1 KB static file<span>re-derived per cell from the client's own byte counters</span></dd></div>
+<div><dt>object</dt><dd>1 KB / 20 KB / 128 KB<span>each at its own URL; size re-derived per cell from the client's byte counters</span></dd></div>
 <div><dt>h3x send-batch</dt><dd>half the worker target<span><code>conns/threads x m / 2</code>, not a fixed 64</span></dd></div>
 <div><dt>colour</dt><dd>magnitude, deepest = largest<span>scale under every table; the row winner also carries a marker</span></dd></div>
 <div><dt>raw data</dt><dd><code>bench/matrix-v3-*.log</code><span>one per server, four client tags interleaved</span></dd></div>
@@ -570,6 +621,12 @@ with open(os.path.join(B, "results.html"), "w") as f:
     f.write(html)
 cells = len(LOGS) * len(COLS) * len(CELLS)
 nodrop = sum(1 for s in LOGS for c in COLS for k in CELLS if data[s][c][k]["srvdrops"] < 0)
-print(f"OK: {cells} cells (4 clients x 3 servers x 24), all object-size checked; panels: {len(ORDER)}")
+if drift:
+    print(f"note: {len(drift)} cells drifted {DRIFT:.0%}-{FATAL:.0%} from the nominal object size "
+          f"(in-flight tail at cutoff, not a wrong payload):")
+    for k, c, cell, d in drift:
+        print(f"  {k[1]}/{k[0]} {c} conns={cell[0]} m={cell[1]}: {d * 100:+.1f}%")
+print(f"OK: {cells} cells ({len(PAYLOADS)} payloads x {len(SRVS)} servers x "
+      f"{len(COLS)} clients x {len(CELLS)}), all object-size checked; panels: {len(ORDER)}")
 if nodrop:
     print(f"note: {nodrop} cells have no UDP drop data (counter unreadable), shown as '?'")
