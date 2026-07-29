@@ -28,7 +28,7 @@ index 2cf699e..3901ded 100644
   * creates a unidirectional stream object
   */
 diff --git a/lib/http3/common.c b/lib/http3/common.c
-index fa21b91..8672215 100644
+index fa21b91..8b74303 100644
 --- a/lib/http3/common.c
 +++ b/lib/http3/common.c
 @@ -123,9 +123,148 @@ Error: {
@@ -180,20 +180,31 @@ index fa21b91..8672215 100644
      union {
          struct cmsghdr hdr;
          char buf[
-@@ -775,13 +914,26 @@ static void process_packets(h2o_quic_ctx_t *ctx, quicly_address_t *destaddr, qui
+@@ -775,13 +914,37 @@ static void process_packets(h2o_quic_ctx_t *ctx, quicly_address_t *destaddr, qui
          ctx->notify_conn_update(ctx, conn);
  }
  
 +/* UDP GRO coalesces many inbound datagrams into a single recv. When enabled, receive buffers must be
-+ * large enough to hold a coalesced (up to 64KB) datagram, so we trade slot count for buffer size. */
++ * large enough to hold a coalesced (up to 64KB) datagram. The slot count is the number of datagrams
++ * one recvmmsg can drain per readable event (there is no drain-to-EAGAIN loop), so it must not be
++ * traded away for buffer size: against a server that does not GSO-batch, GRO cannot coalesce and each
++ * slot holds exactly one datagram, making the slot count the drain rate. Keep both. The array lives in
++ * thread-local storage rather than on the stack, so its size is not stack-bound. */
 +#ifdef UDP_GRO
-+#define QUIC_READ_DGRAMS 4
++#define QUIC_READ_DGRAMS 10
 +#define QUIC_READ_BUFSIZE 65536
 +#else
 +#define QUIC_READ_DGRAMS 10
 +#define QUIC_READ_BUFSIZE 1600
 +#endif
++/* Linux coalesces at most UDP_GRO_CNT_MAX (64) segments into one datagram, so a coalesced datagram can
++ * carry up to 64 segments regardless of how small they are. Sizing this by BUFSIZE/1200 assumes >=1200B
++ * segments and silently truncates (dropping packets QUIC then has to retransmit) when they are smaller. */
++#ifdef UDP_GRO
++#define QUIC_READ_MAX_SEGS (QUIC_READ_DGRAMS * 64)
++#else
 +#define QUIC_READ_MAX_SEGS (QUIC_READ_DGRAMS * (QUIC_READ_BUFSIZE / 1200 + 1))
++#endif
 +
  void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
  {
@@ -208,7 +219,7 @@ index fa21b91..8672215 100644
          union {
              struct cmsghdr _align; /* natrually align the contents of controlbuf (which are of type cmsghdr) */
              char controlbuf[
-@@ -796,11 +948,14 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+@@ -796,11 +959,14 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
  #endif
  #if defined(IPV6_TCLASS) || defined(IP_TOS) || defined(IP_RECVTOS)
                  + CMSG_SPACE(sizeof(int)) /* IPv6 uses int, which is bigger than uint8_t used by IPv4 */
@@ -225,7 +236,7 @@ index fa21b91..8672215 100644
  #ifdef __linux__
      struct mmsghdr mess[PTLS_ELEMENTSOF(dgrams)];
  #else
-@@ -866,6 +1021,7 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+@@ -866,6 +1032,7 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
      /* normalize and store the obtained data into `dgrams` */
      for (dgram_index = 0; dgram_index < num_dgrams; ++dgram_index) {
          dgrams[dgram_index].ecn = 0;
@@ -233,7 +244,7 @@ index fa21b91..8672215 100644
          dgrams[dgram_index].destaddr.sa.sa_family = AF_UNSPEC;
          { /* fetch destination address */
              struct cmsghdr *cmsg;
-@@ -924,6 +1080,15 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+@@ -924,6 +1091,15 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
                          break;
                      }
                      break;
@@ -249,7 +260,7 @@ index fa21b91..8672215 100644
                  }
              }
          }
-@@ -938,65 +1103,87 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+@@ -938,65 +1114,87 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
          }
      }
  
@@ -362,7 +373,7 @@ index fa21b91..8672215 100644
          /* if we have enough room for the next datagram, that is, the expected worst case of 4 packets in a coalesced datagram,
           * continue */
          if (packet_index + 4 < PTLS_ELEMENTSOF(packets))
-@@ -1004,8 +1191,8 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+@@ -1004,8 +1202,8 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
  
      ProcessPackets:
          if (packet_index != 0) {
@@ -373,7 +384,7 @@ index fa21b91..8672215 100644
              if (has_decoded) {
                  packets[0] = packets[packet_index];
                  packet_index = 1;
-@@ -1015,9 +1202,12 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
+@@ -1015,9 +1213,12 @@ void h2o_quic_read_socket(h2o_quic_ctx_t *ctx, h2o_socket_t *sock)
          }
      }
      if (packet_index != 0)
@@ -388,7 +399,7 @@ index fa21b91..8672215 100644
  Exit:;
  
  #undef INIT_DGRAMS
-@@ -1045,6 +1235,12 @@ static void setup_quic_socket(h2o_quic_ctx_t *ctx, h2o_quic_socket_t *qsock, h2o
+@@ -1045,6 +1246,12 @@ static void setup_quic_socket(h2o_quic_ctx_t *ctx, h2o_quic_socket_t *qsock, h2o
          break;
      }
      qsock->sock->data = ctx;

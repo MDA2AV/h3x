@@ -271,14 +271,16 @@ int main(int argc, char **argv)
     if (conf.concurrency < 1)
         conf.concurrency = 1;
     { /* --send-batch <N> (or H3X_SEND_BATCH) holds freed slots until N accumulate, then starts them
-         together so quicly packs the requests into fewer datagrams (send-side coalescing); 1 = off */
+         together so quicly packs the requests into fewer datagrams (send-side coalescing); 1 = off.
+         The count is worker-wide (slots across all of a worker's connections), so it is NOT bounded by
+         -m here: clamping it to the per-connection stream count silently turned --send-batch 64 into 8
+         at -m 8, which is why the knob measured as a no-op. The worker applies the real ceiling, its
+         own connections x streams target, since that depends on the per-worker connection count. */
         const char *e;
         if (conf.send_batch == 0 && (e = getenv("H3X_SEND_BATCH")) != NULL)
             conf.send_batch = (unsigned)strtoul(e, NULL, 10);
         if (conf.send_batch < 1)
             conf.send_batch = 1;
-        if (conf.send_batch > conf.concurrency)
-            conf.send_batch = conf.concurrency;
     }
     if (conf.threads < 1)
         conf.threads = detect_ncpu(); /* default: use every CPU the container gives us */

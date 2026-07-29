@@ -6,13 +6,17 @@ B = "/home/diogo/h3x/bench"
 SERVERS = [("h2o", "vs h2o (quicly, GRO patch, 12 threads, native)"),
            ("nginx", "vs nginx (OpenSSL-QUIC, docker, 12 workers)"),
            ("haproxy", "vs haproxy (HAProxy QUIC, docker, nbthread 12)")]
-LOGS = {  # server -> client -> (file, tag-in-log)
-    "h2o":     {"h3x": ("matrix.log", "h3x"), "h2load": ("matrix.log", "h2load"),
-                "hc": ("matrix-httpclient.log", "httpclient"), "spc": ("matrix-spc-h2o.log", "h3x-spc")},
-    "nginx":   {"h3x": ("matrix-nginx.log", "h3x"), "h2load": ("matrix-nginx.log", "h2load"),
-                "hc": ("matrix-httpclient-nginx.log", "httpclient"), "spc": ("matrix-spc-nginx.log", "h3x-spc")},
-    "haproxy": {"h3x": ("matrix-haproxy.log", "h3x"), "h2load": ("matrix-haproxy.log", "h2load"),
-                "hc": ("matrix-httpclient-haproxy.log", "httpclient"), "spc": ("matrix-spc-haproxy.log", "h3x-spc")},
+# server -> client -> (file, tag-in-log).
+# The h3x and spc columns come from the 2026-07-29 matrix-v2 grid (send-batch clamp fix + the
+# QUIC_READ_DGRAMS / MAX_SEGS change). h2load and h2o-httpclient are unchanged since 2026-07-19 and
+# still read from the v1 logs: neither client was touched, so re-running them would only add noise.
+LOGS = {
+    "h2o":     {"h3x": ("matrix-v2-h2o.log", "h3x"), "h2load": ("matrix.log", "h2load"),
+                "hc": ("matrix-httpclient.log", "httpclient"), "spc": ("matrix-v2-spc-h2o.log", "h3x-spc")},
+    "nginx":   {"h3x": ("matrix-v2-nginx.log", "h3x"), "h2load": ("matrix-nginx.log", "h2load"),
+                "hc": ("matrix-httpclient-nginx.log", "httpclient"), "spc": ("matrix-v2-spc-nginx.log", "h3x-spc")},
+    "haproxy": {"h3x": ("matrix-v2-haproxy.log", "h3x"), "h2load": ("matrix-haproxy.log", "h2load"),
+                "hc": ("matrix-httpclient-haproxy.log", "httpclient"), "spc": ("matrix-v2-spc-haproxy.log", "h3x-spc")},
 }
 CELLS = [(c, m) for c in (64, 128, 256, 512) for m in (1, 2, 8, 16, 32, 64)]
 COLS = ["h3x", "spc", "hc", "h2load"]  # display order
@@ -20,9 +24,11 @@ COLS = ["h3x", "spc", "hc", "h2load"]  # display order
 def parse(path, tag):
     out = {}
     rx = re.compile(rf"^RESULT {re.escape(tag)} conns=(\d+) m=(\d+) (\d+) (\d+)")
-    with open(path) as f:
+    with open(path, errors="replace") as f:
         for line in f:
-            mt = rx.match(line)
+            # A hard reset mid-run can leave the log NUL-padded (it did on 2026-07-29); matrix-v2.sh
+            # strips that tail on its next run, but do not depend on having been re-run first.
+            mt = rx.match(line.replace("\0", ""))
             if mt:
                 out[(int(mt.group(1)), int(mt.group(2)))] = (int(mt.group(3)), int(mt.group(4)))
     return out
@@ -114,22 +120,26 @@ DOC_FINDINGS = """<h4>Key findings</h4>
 per connection (m, the multiplexing depth). h3x is built for a few fat, heavily multiplexed
 connections; h2load for many thin ones.</p>
 <dl class="legend">
-<dt>h3x's home ground</dt><dd>few connections, high m. Its matrix peak is 3.46M req/s at 64
-connections x 32 streams against h2o, roughly 2x h2o's own reference client in that cell</dd>
-<dt>h2load's home ground</dt><dd>the m=64 column, and any many-thin-connections shape; it takes the
-top row in every server's high-m / high-connection cells</dd>
+<dt>h3x's home ground</dt><dd>few connections, high m. Its matrix peak is 3.79M req/s at 64
+connections x 64 streams against h2o, 2.3x h2o's own reference client in that cell</dd>
+<dt>h2load's home ground</dt><dd>many thin connections, and low m generally. It takes nearly every
+nginx cell, and the m=64 column against h2o at 128+ connections. It no longer wins anywhere against
+haproxy</dd>
 <dt>vs h2o</dt><dd>h2o GSO-batches its responses, so h3x's UDP GRO engages and its receive path
-keeps up; h3x leads most cells. At m=1-2 h2load nearly stops (7k-54k req/s) from a
-ngtcp2-x-quicly low-concurrency stall specific to that pairing</dd>
+keeps up; h3x takes 18 of 24 cells. It gives up exactly six, all at 128+ connections: the m=2 cells
+to the reference client (by 2-9%) and the m=64 cells to h2load (by 6-13%). At m=1-2 h2load nearly stops
+(7k-54k req/s) from a ngtcp2-x-quicly low-concurrency stall specific to that pairing</dd>
 <dt>vs nginx</dt><dd>nginx does not GSO-batch, so GRO cannot engage and quicly pays full per-packet
-receive cost; the ranking inverts and h2load leads everywhere above m=1</dd>
-<dt>vs haproxy</dt><dd>haproxy GSO-batches, so h3x and h2load tie on throughput within noise; the
-real difference here is reliability, not speed</dd>
-<dt>reliability</dt><dd>default h3x drops requests against nginx and haproxy (the shared-socket
-4-tuple churn, see "Why h3x drops requests"); <code>--socket-per-conn</code> removes them (0 drops
-in all 24 haproxy cells) at a throughput cost that is largest against h2o</dd>
-<dt>server capability</dt><dd>best-client peak per server: h2o 3.66M &gt; nginx 1.65M &gt; haproxy
-1.43M req/s</dd>
+receive cost; the ranking inverts and h2load leads 22 of 24 cells, by up to 1.85x</dd>
+<dt>vs haproxy</dt><dd>haproxy GSO-batches, and here h3x leads every cell: the h3x family beats
+h2load in all 24, by 1.06x to 1.69x (mean 1.27x). The two socket modes split it evenly, 12 cells
+each</dd>
+<dt>reliability</dt><dd>default h3x drops requests against nginx (5,988 over the grid) and haproxy
+(45,848, every cell), the shared-socket 4-tuple churn; see "Why h3x drops requests".
+<code>--socket-per-conn</code> removes them completely: 0 drops in all 72 cells across all three
+servers. The throughput cost is largest against h2o (5-30%) and roughly nil against haproxy</dd>
+<dt>server capability</dt><dd>best-client peak per server: h2o 3.79M (h3x) &gt; nginx 1.65M
+(h2load) &gt; haproxy 1.51M (h3x spc) req/s</dd>
 </dl>"""
 
 DOC_REPRODUCE = """<h4>Reproduce</h4>
@@ -144,13 +154,19 @@ cmake -S . -B build &amp;&amp; cmake --build build
 build/deps/h2o/h2o -c bench/h2o.conf &amp;
 docker start nginx-h3 haproxy-h3        # :14434 / :14435
 
-# one cell, by hand: 512 connections x 8 streams for 10s against h2o
-build/h3x -k -t 32 --connections 512 -m 8 -d 10 https://127.0.0.1:14433/
+# one cell, by hand: 512 connections x 8 streams for 10s against h2o, send-batch = half the
+# worker target ((512/32) x 8 / 2 = 64)
+build/h3x -k -t 32 --connections 512 -m 8 -d 10 --send-batch 64 https://127.0.0.1:14433/
 
-# the full grid on this page: each script sweeps all three servers and writes bench/matrix*.log
-bash bench/matrix.sh              # h3x + h2load
-bash bench/matrix-spc.sh          # h3x --socket-per-conn
+# the h3x and spc columns: sweeps all three servers, writes bench/matrix-v2*.log. Resumable -
+# re-running it appends only the cells a log is missing and leaves finished grids alone.
+bash bench/matrix-v2.sh
+
+# the other two columns (unchanged since 2026-07-19; only re-run if a client changes)
+bash bench/matrix.sh              # h3x v1 + h2load
+bash bench/matrix-spc.sh          # h3x v1 --socket-per-conn
 bash bench/matrix-httpclient.sh   # h2o's reference httpclient
+
 python3 bench/gen-results.py      # rebuilds this page from the logs</code></pre>
 <p>Every client here served the same 1 KB <code>bench/doc_root/index.html</code>. Each table cell is
 one 10 s run; the raw per-run logs are the <code>bench/matrix*.log</code> files the page is built
@@ -160,16 +176,21 @@ NOTES_BODY = """<p>h2load dropped 0 requests in all 72 cells. The h2load collaps
 (7k-54k req/s there vs 480k-820k against nginx and 410k-540k against haproxy): a pairing-specific
 interaction between ngtcp2 and the quicly server at low concurrency, not general client behavior.
 Against nginx the picture inverts for h3x: no GSO-batched responses means its GRO cannot engage,
-quicly pays full per-packet receive cost, and h2load leads everywhere above m=1. Against haproxy
-h3x and h2load tie within noise on throughput. h2o-httpclient error lines were negligible
+quicly pays full per-packet receive cost, and h2load leads 22 of 24 cells. Against haproxy the h3x
+family leads all 24. h2o-httpclient error lines were negligible
 (2-7 per cell, process-teardown artifacts) in every cell against nginx and up to 256 conns against
 h2o and haproxy; real volumes appeared only at 512 conns against h2o (516 at m=2, 2,051 at m=8,
 8,200 at m=32, 16,387 at m=64, uncharacterized by type) and mildly against haproxy (35-195). The
-spc column: zero drops in all 24 haproxy cells and nearly all nginx and h2o cells (residuals at 512
-conns are the separate handshake-timeout tail); its throughput cost vs shared-socket mode is
-largest against h2o at 128+ conns (up to ~35%, the shared model's home ground: one socket to poll
-and batched sends), and roughly par or slightly ahead against haproxy. Single unpinned runs:
-differences under ~1.5x are within run-to-run noise.</p>"""
+spc column: zero drops in all 72 cells, on every server. Its throughput cost vs shared-socket mode
+is largest against h2o (4.6-29.6%, worst at 128 conns; the shared model's home ground is one socket
+to poll and batched sends) and a wash against haproxy (-10.5% to +26.6%, mean +0.1%). Single
+unpinned runs: differences under ~1.5x are within run-to-run noise.</p>
+<p><b>Mixed measurement dates.</b> The h3x and spc columns are from 2026-07-29; h2load and
+h2o-httpclient are from 2026-07-19 and were not re-run, since neither client changed and re-running
+would only add noise. Same box, same servers, same 1 KB object, but not the same sitting, so
+cross-column gaps carry a little more uncertainty than within-column ones. The 2026-07-29 grid was
+itself interrupted by a hard reset partway through the nginx spc table, so that one table spans a
+reboot: conns 64-128 and 256/m&le;16 predate it, the rest follow.</p>"""
 
 DROPS_BODY = """<p>The trigger is multiplexing many QUIC connections over one UDP socket per worker. Differential
 tests against haproxy: one connection per socket is flawless (32 conns / 32 sockets: 7.19M requests,
@@ -279,7 +300,10 @@ html = f"""<!doctype html>
 <p>req/s per client, best of one 10 s run. <span class="g">&nbsp;green&nbsp;</span> fastest,
 <span class="y">&nbsp;yellow&nbsp;</span> middle, <span class="r">&nbsp;red&nbsp;</span> slowest;
 % is share of the fastest. Loopback, i9-14900K, 32 CPUs, unpinned; all clients native, <code>-t
-32</code>, h3x <code>--send-batch 64</code>. Raw data: <code>bench/matrix*.log</code>.</p>
+32</code>. h3x <code>--send-batch</code> is set per cell to half the worker-wide target
+(<code>conns/threads x m</code>), not a fixed 64: a fixed value means a different thing in every
+cell. Raw data: <code>bench/matrix-v2*.log</code> (h3x, spc) and <code>bench/matrix*.log</code>
+(h2load, h2o-httpclient).</p>
 </header>
 {radios}
 <div class="layout">
